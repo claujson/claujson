@@ -40,12 +40,12 @@ namespace claujson {
 		}
 		void* use() {
 			uint64_t value = (uint64_t)ptr;
-			value = value & 0x7FFFFFFFFFFFFC;
+			value = value & 0x7FFFFFFFFFFFFFFC;
 			return (void*)value;
 		}
 		const void* use() const {
 			uint64_t value = (uint64_t)ptr;
-			value = value & 0x7FFFFFFFFFFFFC;
+			value = value & 0x7FFFFFFFFFFFFFFC;
 			return (void*)value;
 		}
 	};
@@ -714,3 +714,4 @@ namespace claujson {
 	claujson::_Value& Convert(claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
 			char* buf, uint64_t token_idx, bool& err);
 }
+

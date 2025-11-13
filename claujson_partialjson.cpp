@@ -7,30 +7,10 @@ namespace claujson {
 	const uint64_t PartialJson::npos = -1; // 
 
 	PartialJson::~PartialJson() {
-		for (auto& x : obj_data) {
-			if (x.second.is_array()) {
-				delete (x.second.as_array());
-			}
-			if (x.second.is_object()) {
-				delete (x.second.as_object());
-			}
-		}
-
-		for (auto& x : arr_vec) {
-			if (x.is_array()) {
-				delete (x.as_array());
-			}
-			if (x.is_object()) {
-				delete (x.as_object());
-			}
-		}
-
-		if (virtualJson.is_structured()) {
-			clean(virtualJson);
-		}
+		//
 	}
 
-	PartialJson::PartialJson() : virtualJson(), arr_vec(), obj_data() {
+	PartialJson::PartialJson(Arena* pool) : virtualJson(pool), arr_vec(pool, 0, 1), obj_data(pool, 0, 1), pool(pool) {
 
 	}
 
@@ -194,13 +174,13 @@ namespace claujson {
 
 				bool e = false;
 
-				claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e);
+				claujson::Convert(pool, temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e);
 
 				if (e) {
 					ERROR("Error in add_item_type");
 				}
 
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e);
+				claujson::Convert(pool, temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e);
 
 				if (e) {
 					ERROR("Error in add_item_type");
@@ -215,7 +195,7 @@ namespace claujson {
 					ERROR("partialJson is array or object.6");
 				}
 
-				obj_data.push_back({ std::move(temp), std::move(temp2) });
+				obj_data.emplace_back(std::move(temp), std::move(temp2));
 			}
 	}
 
@@ -226,7 +206,7 @@ namespace claujson {
 				_Value temp2;
 				bool e = false;
 
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e);
+				claujson::Convert(pool, temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e);
 
 				if (e) {
 
@@ -237,12 +217,12 @@ namespace claujson {
 					ERROR("partialJson is array or object.5");
 				}
 
-				arr_vec.push_back(std::move(temp2));
+				arr_vec.emplace_back(std::move(temp2));
 			}
 	}
 
 	 void PartialJson::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
-		_ValueType type, uint64_t key_token_idx
+		_ValueType type, uint64_t key_token_idx, Arena* pool
 
 	) {
 		{
@@ -253,7 +233,7 @@ namespace claujson {
 			_Value temp;
 			bool e = false;
 
-			claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e);
+			claujson::Convert(pool, temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e);
 
 			if (e) {
 				ERROR("Error in add_user_type");
@@ -264,35 +244,31 @@ namespace claujson {
 			}
 
 			if (type == _ValueType::OBJECT) {
-				StructuredPtr json = new (std::nothrow) Object(
-				);
-
+				StructuredPtr json = Object::Make(pool);
 				if (json == nullptr) {
 					log << warn << "new error";
 					return;
 				}
 
-				obj_data.push_back({ std::move(temp), _Value(json) });
-
 				json.set_parent(StructuredPtr(this));
+				obj_data.emplace_back(std::move(temp), _Value(json));
+
 			}
 			else if (type == _ValueType::ARRAY) {
-				StructuredPtr json = new (std::nothrow) Array(
-
-				);
+				StructuredPtr json = Array::Make(pool);
 
 				if (json == nullptr) {
 					log << warn << "new error";
 					return;
 				}
 
-				obj_data.push_back({ std::move(temp), _Value(json) });
-
 				json.set_parent(StructuredPtr(this));
+				obj_data.emplace_back(std::move(temp), _Value(json));
+
 			}
 		}
 	}
-	 void PartialJson::add_user_type(_ValueType type
+	 void PartialJson::add_user_type(_ValueType type, Arena* pool
 
 	) {
 		{
@@ -303,14 +279,10 @@ namespace claujson {
 			StructuredPtr json;
 
 			if (type == _ValueType::OBJECT) {
-				json = new (std::nothrow) Object(
-
-				);
+				json = Object::Make(pool);
 			}
 			else if (type == _ValueType::ARRAY) {
-				json = new (std::nothrow) Array(
-
-				);
+				json = Array::Make(pool);
 			}
 
 			if (json == nullptr) {
@@ -318,9 +290,9 @@ namespace claujson {
 				return;
 			}
 
-			arr_vec.push_back(_Value(json));
-
 			json.set_parent(this);
+			arr_vec.emplace_back(json);
+
 		}
 	}
 
@@ -351,7 +323,7 @@ namespace claujson {
 			val.Get().as_object()->set_parent(this);
 		}
 
-		obj_data.push_back({ std::move(key.Get()), std::move(val.Get()) });
+		obj_data.emplace_back(std::move(key.Get()), std::move(val.Get()));
 
 		return true;
 	}
@@ -383,7 +355,7 @@ namespace claujson {
 			val.Get().as_object()->set_parent(this);
 		}
 
-		arr_vec.push_back(std::move(val.Get()));
+		arr_vec.emplace_back(std::move(val.Get()));
 
 		return true;
 	}
@@ -400,8 +372,8 @@ namespace claujson {
 			}
 		}
 		if (x->arr_vec.empty() == false) {
-			arr_vec.insert(arr_vec.end(), std::make_move_iterator(x->arr_vec.begin()) + start_offset,
-				std::make_move_iterator(x->arr_vec.end()));
+			arr_vec.insert((x->arr_vec.begin()) + start_offset,
+				(x->arr_vec.end()));
 		}
 		else {
 
@@ -429,8 +401,8 @@ namespace claujson {
 		}
 
 		if (x->arr_vec.empty() == false) {
-			arr_vec.insert(arr_vec.end(), std::make_move_iterator(x->arr_vec.begin()) + start_offset,
-				std::make_move_iterator(x->arr_vec.end()));
+			arr_vec.insert((x->arr_vec.begin()) + start_offset,
+				(x->arr_vec.end()));
 		}
 		else {
 

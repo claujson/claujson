@@ -7,19 +7,25 @@
 
 #include "thread_pool.h"
 
-#include "_simdjson.h" // modified simdjson // using simdjson 3.9.1
+#include "_simdjson.h" // modified simdjson // using simdjson 3.12.3
 
 namespace claujson {
+	class _Value;
+	class Array;
+	class Object;
+	class PartialJson;
+	class StructuredPtr;
+
 
 	//only used in Array, and Object, (parent Pointer + is_virtual?)
 	class Pointer {
-	private: 
-		void* ptr = nullptr; 
+	private:
+		void* ptr = nullptr;
 	public:
 		Pointer() {}
 		// left_op : 1bit
 		// right_op : 2bit
-		Pointer(void* ptr, uint8_t left_op, uint8_t right_op) {
+		explicit Pointer(void* ptr, uint32_t left_op, uint32_t right_op) {
 			uint64_t value = (uint64_t)ptr;
 			if (left_op) {
 				value = value | 0x8000000000000000;
@@ -51,11 +57,6 @@ namespace claujson {
 	};
 
 
-	class _Value;
-	class Array;
-	class Object;
-	class PartialJson;
-	class StructuredPtr;
 
 	class _Value {
 	public:
@@ -72,7 +73,7 @@ namespace claujson {
 	public:
 		friend std::ostream& operator<<(std::ostream& stream, const _Value& data);
 
-		friend bool ConvertString(_Value& data, const char* text, uint64_t len);
+		friend bool ConvertString(Arena* pool, _Value& data, const char* text, uint64_t len);
 
 		friend class Object;
 		friend class Array;
@@ -88,12 +89,11 @@ namespace claujson {
 					Array* _array_ptr;
 					Object* _obj_ptr;
 					PartialJson* _pj_ptr;
+					String* _str_val;
 					bool _bool_val;
 				};
-				uint32_t temp;
 				_ValueType _type;
 			};
-			String _str_val;
 		};
 
 		/// before version..
@@ -108,9 +108,10 @@ namespace claujson {
 		//_ValueType _type = _ValueType::NONE; 
 		//bool _valid = true;
 
+
 	public:
 
-		_Value clone() const;
+		_Value clone(Arena* pool) const;
 
 		explicit operator bool() const;
 
@@ -127,15 +128,18 @@ namespace claujson {
 		explicit _Value(uint64_t x);
 		explicit _Value(double x);
 
-		explicit _Value(StringView x); 
+		explicit _Value(Arena* pool, StringView x); 
 
 #if __cpp_lib_char8_t
 		// C++20~
-		explicit _Value(std::u8string_view x);
-		explicit _Value(const char8_t* x);
+		explicit _Value(Arena* pool, std::u8string_view x);
+		explicit _Value(Arena* pool, const char8_t* x);
 #endif
-		
-		explicit _Value(const char* x);
+	private:
+		_Value(const char* x) = delete;
+	public:
+
+		explicit _Value(Arena* pool, const char* x);
 
 		explicit _Value(_Value*) = delete;
 
@@ -145,7 +149,8 @@ namespace claujson {
 		explicit _Value(std::nullptr_t, bool valid);
 
 		explicit _Value(String&& x) {
-			this->_str_val = std::move(x);
+			this->_type = x.type;
+			*this->_str_val = std::move(x);
 		}
 	public:
 		_ValueType type() const;
@@ -234,8 +239,8 @@ namespace claujson {
 
 		bool& bool_val();
 
-		_Value& json_pointerB(const std_vector<_Value>& routeDataVec);
-		const _Value& json_pointerB(const std_vector<_Value>& routeVec) const;
+		_Value& json_pointerB(const my_vector<_Value>& routeDataVec);
+		const _Value& json_pointerB(const my_vector<_Value>& routeVec) const;
 
 		Array* as_array();
 		Object* as_object();
@@ -278,14 +283,14 @@ namespace claujson {
 
 		void set_float(double x);
 
-		bool set_str(const char* str, uint64_t len);
+		bool set_str(Arena* pool, const char* str, uint64_t len);
 
 		bool set_str(String str);
 	private:
-		void set_str_in_parse(const char* str, uint64_t len);
+		void set_str_in_parse(Arena* pool, const char* str, uint64_t len);
 	public:
 		void set_bool(bool x);
-
+		
 		void set_null();
 
 		void set_none();
@@ -324,7 +329,10 @@ namespace claujson {
 
 		_Value(const _Value& other) = delete;
 
-		_Value(_Value&& other) noexcept;
+		_Value(_Value&& other) {
+			this->init(std::move(other));
+		}
+		void init(_Value&& other) noexcept;
 
 		_Value();
 
@@ -351,11 +359,11 @@ namespace claujson {
 	public:
 		Value() noexcept { }
 
-		Value(_Value&& x) noexcept : x(std::move(x)) {
-			//
+		Value(_Value&& x) noexcept {
+			this->x.init(std::move(x));
 		}
-		Value(Value&& x) noexcept : x(std::move(x.x)) {
-			//
+		Value(Value&& x) noexcept  {
+			this->x.init(std::move(x.x));
 		}
 
 		~Value() noexcept;
@@ -403,16 +411,20 @@ namespace claujson {
 		friend class parser;
 	private:
 		_Value x;
-
+		Arena* pool; // getter? public?
 	public:
-		Document() noexcept { }
+		Document(uint64_t size = Arena::initialSize) noexcept { pool = new (std::nothrow) Arena(size); }
 
-		Document(_Value&& x) noexcept : x(std::move(x))  {
-			//
+		Document(_Value&& x, uint64_t size = Arena::initialSize) noexcept {
+			this->x.init(std::move(x));
+			pool = new (std::nothrow) Arena(size);
 		}
 
-
-		Document(Document&& d) noexcept : x(std::move(d.x)) {}
+		Document(Document&& d) noexcept  { 
+			this->x.init(std::move(d.x));
+			this->pool = (d.pool);
+			d.pool = nullptr; 
+		}
 
 		~Document() noexcept;
 	public:
@@ -421,6 +433,12 @@ namespace claujson {
 	public:
 		_Value& Get() noexcept { return x; }
 		const _Value& Get() const noexcept { return x; }
+		Arena* GetAllocator() noexcept {
+			return pool;
+		}
+		const Arena* GetAllocator() const noexcept {
+			return pool;
+		}
 	};
 }
 
@@ -432,7 +450,6 @@ namespace claujson {
 		friend class _Value;
 		friend class Array;
 		friend class Object;
-
 		static const uint64_t npos;
 		static _Value empty_value;
 		
@@ -511,6 +528,8 @@ namespace claujson {
 		
 		bool empty() const;
 
+		Arena* get_pool();
+
 		_Value& get_value_list(uint64_t idx);
 		_Value& get_key_list(uint64_t idx);
 
@@ -524,6 +543,8 @@ namespace claujson {
 
 		bool change_key(const _Value& key, Value&& next_key);
 		bool change_key(uint64_t idx, Value&& next_key);
+		
+		bool has_pool() const;
 
 		explicit operator bool() const {
 			return arr;
@@ -532,9 +553,6 @@ namespace claujson {
 		bool operator==(const StructuredPtr& other) const {
 			return arr == other.arr && type == other.type;
 		}
-
-
-		void null_parent();
 
 		bool is_array() const {
 			return type == 1;
@@ -570,6 +588,7 @@ namespace claujson {
 
 		// pj`s parent is nullptr.
 		StructuredPtr get_parent();
+		void null_parent();
 
 		void erase(uint64_t idx, bool real = false);
 		void erase(const _Value& key, bool real = false);
@@ -607,17 +626,17 @@ namespace claujson {
 	private:
 		// need rename param....!
 		void add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t key_token_idx, uint64_t val_token_idx);
+			char* buf, uint64_t key_token_idx, uint64_t val_token_idx, Arena* pool);
 
 		void add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t val_token_idx);
+			char* buf, uint64_t val_token_idx, Arena* pool);
 
 		void add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
-			_ValueType type, uint64_t key_token_idx
+			_ValueType type, uint64_t key_token_idx, Arena* pool
 		);
 
 		//
-		void add_user_type(_ValueType type
+		void add_user_type(_ValueType type, Arena* pool
 		); // int type -> enum?
 	public:
 
@@ -674,15 +693,15 @@ namespace claujson {
 
 		void write(const std::string& fileName, const _Value& global, bool pretty = false);
 
-		void write_parallel(const std::string& fileName, _Value& j, uint64_t thr_num, bool pretty = false);
+		void write_parallel(Arena* pool, const std::string& fileName, _Value& j, uint64_t thr_num, bool pretty = false);
 		void write_parallel2(const std::string& fileName, const _Value& j, uint64_t thr_num, bool pretty = false);
 	};
 
 
 	[[nodiscard]]
-	_Value diff(const _Value& x, const _Value& y);
+	_Value diff(Arena* pool, const _Value& x, const _Value& y);
 
-	_Value& patch(_Value& x, const _Value& diff);
+	_Value& patch(Arena* pool, _Value& x, const _Value& diff);
 
 	void clean(_Value& x); //
 
@@ -711,7 +730,6 @@ namespace claujson {
 	} while (false) 
 
 namespace claujson {
-	claujson::_Value& Convert(claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
+	claujson::_Value& Convert(Arena* pool, claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
 			char* buf, uint64_t token_idx, bool& err);
 }
-

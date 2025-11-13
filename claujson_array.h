@@ -8,7 +8,7 @@ namespace claujson {
 	protected:
 		std_vector<_Value> arr_vec;
 		//StructuredPtr parent;
-		Pointer parent;
+		Pointer parent; // parent + virtual ( + arr_type? )
 
 		static _Value data_null; // valid is false..
 		static const uint64_t npos;

@@ -3,7 +3,7 @@
 namespace claujson {
 	extern Log log;
 
-	_Value _Value::clone() const {
+	_Value _Value::clone(Arena* pool) const {
 		if (!is_valid()) {
 			return _Value(nullptr, false);
 		}
@@ -12,18 +12,18 @@ namespace claujson {
 
 		x._type = this->_type;
 
-		if (x.is_str()) {
-			x._str_val = (this->_str_val);
+		if (this->is_str()) {
+			x.set_str_in_parse(pool, this->_str_val->data(), this->_str_val->size());
 		}
 		else {
 			x._int_val = this->_int_val;
 		}
 
 		if (x.is_array()) {
-			x._array_ptr = this->as_array()->clone();
+			x = this->as_array()->clone(pool);
 		}
 		else if (x.is_object()) {
-			x._obj_ptr = this->as_object()->clone();
+			x = this->as_object()->clone(pool);
 		}
 
 		return x;
@@ -93,39 +93,40 @@ namespace claujson {
 		this->_type = _ValueType::NONE;
 		set_float(x);
 	}
-	_Value::_Value(StringView x) {
+	_Value::_Value(Arena* pool, StringView x) {
 		this->_int_val = 0;
 		this->_type = _ValueType::NONE;
-		if (!set_str(x.data(), x.size())) {
+
+		if (!set_str(pool, x.data(), x.size())) {
 			set_type(_ValueType::NOT_VALID);
 		}
 	}
 
 #if __cpp_lib_char8_t
 	// C++20~
-	_Value::_Value(std::u8string_view x) {
+	_Value::_Value(Arena* pool, std::u8string_view x) {
 		this->_int_val = 0;
 		this->_type = _ValueType::NONE;
-		if (!set_str(reinterpret_cast<const char*>(x.data()), x.size())) {
+		if (!set_str(pool, reinterpret_cast<const char*>(x.data()), x.size())) {
 			set_type(_ValueType::NOT_VALID);
 		}
 	}
 
-	_Value::_Value(const char8_t* x) {
+	_Value::_Value(Arena* pool, const char8_t* x) {
 		std::u8string_view sv(x);
 		this->_int_val = 0;
 		this->_type = _ValueType::NONE;
-		if (!set_str(reinterpret_cast<const char*>(sv.data()), sv.size())) {
+		if (!set_str(pool, reinterpret_cast<const char*>(sv.data()), sv.size())) {
 			set_type(_ValueType::NOT_VALID);
 		}
 	}
 
 #endif
 
-	_Value::_Value(const char* x) {
+	_Value::_Value(Arena* pool, const char* x) {
 		this->_int_val = 0;
 		this->_type = _ValueType::NONE;
-		if (!set_str(x, strlen(x))) {
+		if (!set_str(pool, x, strlen(x))) {
 			set_type(_ValueType::NOT_VALID);
 		}
 	}
@@ -239,7 +240,7 @@ namespace claujson {
 	}
 
 	// this _Value is Array or Object.
-	_Value& _Value::json_pointerB(const std_vector<_Value>& routeVec) {
+	_Value& _Value::json_pointerB(const my_vector<_Value>& routeVec) {
 		static _Value unvalid_data(nullptr, false);
 
 		if (is_structured() == false) {
@@ -283,7 +284,7 @@ namespace claujson {
 		return *data;
 	}
 
-	const _Value& _Value::json_pointerB(const std_vector<_Value>& routeVec) const { // option-> StringView route?
+	const _Value& _Value::json_pointerB(const my_vector<_Value>& routeVec) const { // option-> StringView route?
 		static _Value unvalid_data(nullptr, false);
 
 		if (is_structured() == false) {
@@ -331,9 +332,15 @@ namespace claujson {
 	void _Value::clear(bool remove_str) {
 
 		if (remove_str && is_str()) {
-			_str_val.clear();
+			_str_val->clear();
+			if (_str_val->pool) {
+				//
+			}
+			else {
+				delete _str_val;
+			}
 			_int_val = 0;
-			temp = 0;
+			//temp = 0;
 			_type = _ValueType::NONE;
 		}
 		else if (is_str()) {
@@ -341,19 +348,19 @@ namespace claujson {
 		}
 		else {
 			_int_val = 0;
-			temp = 0;
+			//temp = 0;
 			_type = _ValueType::NONE;
 		}
 	}
 
 	String& _Value::str_val() {
 		// type check...
-		return _str_val;
+		return *_str_val;
 	}
 
 	const String& _Value::str_val() const {
 		// type check...
-		return _str_val;
+		return *_str_val;
 	}
 
 	void _Value::set_int(long long x) {
@@ -362,7 +369,13 @@ namespace claujson {
 		}
 
 		if (is_str()) {
-			_str_val.clear();
+			_str_val->clear();
+			if (_str_val->pool) {
+				//
+			}
+			else {
+				delete _str_val;
+			}
 		}
 		_int_val = x;
 		_type = _ValueType::INT;
@@ -373,7 +386,13 @@ namespace claujson {
 			return;
 		}
 		if (is_str()) {
-			_str_val.clear();
+			_str_val->clear();
+			if (_str_val->pool) {
+				//
+			}
+			else {
+				delete _str_val;
+			}
 		}
 		_uint_val = x;
 		_type = _ValueType::UINT;
@@ -384,14 +403,20 @@ namespace claujson {
 			return;
 		}
 		if (is_str()) {
-			_str_val.clear();
+			_str_val->clear();
+			if (_str_val->pool) {
+				//
+			}
+			else {
+				delete _str_val;
+			}
 		}
 		_float_val = x;
 
 		_type = _ValueType::FLOAT;
 	}
 
-	bool _Value::set_str(const char* str, uint64_t len) {
+	bool _Value::set_str(Arena* pool, const char* str, uint64_t len) {
 
 		bool convert = true;
 
@@ -400,7 +425,13 @@ namespace claujson {
 		}
 
 		if (!convert) {
-			_str_val = String(str, Static_Cast<uint64_t, uint32_t>(len));
+			if (pool) {
+				_str_val = (String*)pool->allocate<String>(sizeof(String));
+				_str_val->init(pool, str, Static_Cast<uint64_t, uint32_t>(len));
+			}
+			else {
+				_str_val->init(pool, str, Static_Cast<uint64_t, uint32_t>(len));
+			}
 			return true;
 		}
 
@@ -452,11 +483,12 @@ namespace claujson {
 				*x = '\0';
 				uint32_t string_length = uint32_t(x - buf_dest);
 
-				if (is_str() == false) {
-					_str_val = String((char*)buf_dest, string_length);
+				if (pool) {
+					_str_val = (String*)pool->allocate<String>(sizeof(String));
+					_str_val->init(pool, (char*)buf_dest, string_length);
 				}
 				else {
-					_str_val = String((char*)buf_dest, string_length);
+					_str_val->init(pool, (char*)buf_dest, string_length);
 				}
 			}
 
@@ -488,16 +520,17 @@ namespace claujson {
 				*x = '\0';
 				uint32_t string_length = uint32_t(x - buf_dest);
 
-				if (!is_str()) {
-					_str_val = String((char*)buf_dest, string_length);
+				if (pool) {
+					_str_val = (String*)pool->allocate<String>(sizeof(String));
+					_str_val->init(pool, (char*)buf_dest, string_length);
 				}
 				else {
-					_str_val = String((char*)buf_dest, string_length);
+					_str_val->init(pool, (char*)buf_dest, string_length);
 				}
 			}
 		}
 
-		//_type = _ValueType::STRING;
+		_type = _ValueType::STRING;
 
 		return true;
 	}
@@ -509,15 +542,31 @@ namespace claujson {
 			return false;
 		}
 		if (is_str()) {
-			_str_val.clear();
+			_str_val->clear();
+			*_str_val = std::move(str);
 		}
-
-		_str_val = std::move(str);
+		else {
+			if (str.pool) {
+				_str_val = (String*)str.pool->allocate<String>(sizeof(String));
+				new (_str_val)String(std::move(str));
+			}
+			else {
+				_str_val = new String(std::move(str));
+			}
+		}
+		_type = _ValueType::STRING;
 		return true;
 	}
 
-	void _Value::set_str_in_parse(const char* str, uint64_t len) {
-		_str_val = String(str, Static_Cast<uint64_t, uint32_t>(len));
+	void _Value::set_str_in_parse(Arena* pool, const char* str, uint64_t len) {
+		if (pool) {
+			_str_val = (String*)pool->allocate<String>(sizeof(String));
+			_str_val->init(pool, str, Static_Cast<uint64_t, uint32_t>(len));
+		}
+		else {
+			_str_val->init(pool, str, Static_Cast<uint64_t, uint32_t>(len));
+		}
+		_type = _ValueType::STRING;
 	}
 
 	void _Value::set_bool(bool x) {
@@ -525,7 +574,13 @@ namespace claujson {
 			return;
 		}
 		if (is_str()) {
-			_str_val.clear();
+			_str_val->clear();
+			if (_str_val->pool) {
+				//
+			}
+			else {
+				delete _str_val;
+			}
 		}
 
 		_bool_val = x;
@@ -535,26 +590,38 @@ namespace claujson {
 		}
 	}
 
-	void _Value::set_null() {
-		if (!is_valid()) {
-			return;
-		}
-		if (is_str()) {
-			_str_val.clear();
-		}
-
-		set_type(_ValueType::NULL_);
-	}
-
 	void _Value::set_none() {
 		if (!is_valid()) {
 			return;
 		}
 		if (is_str()) {
-			_str_val.clear();
+			_str_val->clear();
+			if (_str_val->pool) {
+				//
+			}
+			else {
+				delete _str_val; _str_val = nullptr;
+			}
 		}
 
 		set_type(_ValueType::NONE);
+	}
+
+	void _Value::set_null() {
+		if (!is_valid()) {
+			return;
+		}
+		if (is_str()) {
+			_str_val->clear();
+			if (_str_val->pool) {
+				//
+			}
+			else {
+				delete _str_val; _str_val = nullptr;
+			}
+		}
+
+		set_type(_ValueType::NULL_);
 	}
 
 	void _Value::set_type(_ValueType type) {
@@ -562,24 +629,22 @@ namespace claujson {
 	}
 
 	_Value::~_Value() {
-		if (is_str()) {
-			_str_val.clear();
-		}
+		//
 	}
 
-	_Value::_Value(_Value&& other) noexcept
-		: _type(_ValueType::NONE)
+	void _Value::init(_Value&& other) noexcept
+		
 	{
+		this->_type = _ValueType::NONE;
+
 		if (!other.is_valid()) {
 			return;
 		}
 
-		if (other.is_str()) {
-			_str_val = std::move(other._str_val);
-		}
-		else {
-			std::swap(_int_val, other._int_val);
-			std::swap(this->_type, other._type);
+		{
+			_int_val = other._int_val;
+			this->_type = other._type;
+			other._type = _ValueType::NONE;
 		}
 	}
 
@@ -590,7 +655,7 @@ namespace claujson {
 			switch (this->_type) {
 			case _ValueType::STRING:
 			case _ValueType::SHORT_STRING:
-				return this->_str_val == other._str_val;
+				return *this->_str_val == *other._str_val;
 				break;
 			case _ValueType::INT:
 				return this->_int_val == other._int_val;
@@ -667,7 +732,7 @@ namespace claujson {
 			switch (this->_type) {
 			case _ValueType::STRING:
 			case _ValueType::SHORT_STRING:
-				return this->_str_val < other._str_val;
+				return *this->_str_val < *other._str_val;
 				break;
 			case _ValueType::INT:
 				return this->_int_val < other._int_val;
@@ -699,7 +764,7 @@ namespace claujson {
 
 		std::swap(this->_type, other._type);
 		std::swap(this->_int_val, other._int_val);
-		std::swap(this->temp, other.temp);
+		//std::swap(this->temp, other.temp);
 		
 		clean(other);
 

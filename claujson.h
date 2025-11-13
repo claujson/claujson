@@ -40,12 +40,12 @@ namespace claujson {
 		}
 		void* use() {
 			uint64_t value = (uint64_t)ptr;
-			value = value & 0x7FFFFFFFFFFFFC;
+			value = value & 0x7FFFFFFFFFFFFFFC;
 			return (void*)value;
 		}
 		const void* use() const {
 			uint64_t value = (uint64_t)ptr;
-			value = value & 0x7FFFFFFFFFFFFC;
+			value = value & 0x7FFFFFFFFFFFFFFC;
 			return (void*)value;
 		}
 	};

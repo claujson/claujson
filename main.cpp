@@ -811,25 +811,6 @@ void diff_test2() {
 
 */
 
-void iterate(claujson::_Value& v, double& sum) {
-	if (v.is_primitive()) {
-		if (v.is_float()) {
-			sum += v.get_floating();
-		}
-		return;
-	}
-
-	auto x = v.as_structured_ptr();
-	for (int64_t i = 0; i < x.size(); ++i) {
-		if (x.get_value_list(i).is_structured()) {
-			iterate(x.get_value_list(i), sum);
-		}
-		else if (x.get_value_list(i).is_float()) {
-			sum += x.get_value_list(i).get_floating();
-		}
-	}
-}
-
 int main(int argc, char* argv[])
 {
 	{
@@ -1022,7 +1003,7 @@ int main(int argc, char* argv[])
 					auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(b - a);
 					std::cout << "total " << dur.count() << "ms\n";
 					//	return 0;
-					//continue;
+					continue;
 					auto c = std::chrono::steady_clock::now();
 					{
 					//	auto z = j.Get().clone();
@@ -1036,7 +1017,6 @@ int main(int argc, char* argv[])
 
 					//return 0;
 
-					continue;
 					//debug test
 				//	//std::cout << j << "\n";
 				//	std::cout << "chk\n";
@@ -1069,15 +1049,12 @@ int main(int argc, char* argv[])
 
 					//claujson::clean(j);
 					//return 0;
-					b = std::chrono::steady_clock::now();
+					//b = std::chrono::steady_clock::now();
 					//test::write("test78.json", j);
 
 				//	std::cout << "write " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - b).count() << "ms\n";
-					{
-						double sum = 0;
-						iterate(j.Get(), sum);
-						std::cout << "test sum " << sum << "\n";
-					}
+
+
 					//claujson::clean(j);
 
 					//return 0;
@@ -1086,8 +1063,8 @@ int main(int argc, char* argv[])
 					//claujson::LoadData::write("output14.json", j);
 	//
 					c = std::chrono::steady_clock::now();
-					dur = std::chrono::duration_cast<std::chrono::milliseconds>(c - b);
-					std::cout << "iterate " << dur.count() << "ms\n";
+					//dur = std::chrono::duration_cast<std::chrono::milliseconds>(c - b);
+					//std::cout << "write " << dur.count() << "ms\n";
 
 					int counter = 0;
 					ok = x.first;

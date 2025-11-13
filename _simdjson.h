@@ -5405,7 +5405,7 @@ protected:
 class parser_for_claujson : public parser {
   public:
       char* raw_buf() {
-          return loaded_bytes.get() + (has_bom ? 3 : 0);
+          return loaded_bytes.get() + (has_bom ? 3:0);
       }
       std::unique_ptr<internal::dom_parser_implementation>& raw_implementation() {
           return implementation;
@@ -5413,7 +5413,7 @@ class parser_for_claujson : public parser {
       uint64_t raw_len() {
           return len;
       }
-  
+
       virtual ~parser_for_claujson() {
           //
       }
@@ -8205,7 +8205,8 @@ inline _simdjson_result<element> parser_for_claujson::parse_into_document(docume
       std::memcpy(static_cast<void*>(loaded_bytes.get()), buf, len);
       buf = reinterpret_cast<const uint8_t*>(loaded_bytes.get());
   }
- 
+
+  // chk bom
   this->has_bom = false;
   if ((len >= 3) && (std::memcmp(buf, "\xEF\xBB\xBF", 3) == 0)) {
       buf += 3;

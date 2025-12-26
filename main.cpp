@@ -1036,7 +1036,7 @@ int main(int argc, char* argv[])
 
 					//return 0;
 
-					continue;
+				//	continue;
 					//debug test
 				//	//std::cout << j << "\n";
 				//	std::cout << "chk\n";
@@ -1046,7 +1046,7 @@ int main(int argc, char* argv[])
 
 					claujson::writer w;
 
-					w.write_parallel("temp.json", j.Get(), 0, true);
+					w.write_parallel("temp.json", j.Get(), 1, true);
 
 					std::cout << "write_parallel " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - c).count() << "ms\n";
 

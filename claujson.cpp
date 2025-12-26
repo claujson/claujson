@@ -8,6 +8,9 @@
 #include <array>
 
 #include "fmt/format.h"
+#include "fmt/compile.h"
+
+#include <charconv>
 
 #if __cpp_lib_string_view
 
@@ -952,51 +955,57 @@ namespace claujson {
 		
 	// class PartialJson, only used in class LoadData2.
 		// todo - rename? PartialNode ?
+class StrStream {
+private:
+	//std::string m_buffer;
+	fmt::memory_buffer m_buffer;
+	//char temp[4096];
+public:
+	StrStream() {
+		//
+	}
 
-	class StrStream {
-	private:
-		//std::string m_buffer;
-		fmt::memory_buffer m_buffer;
-	public:
+public:
 
-		const char* buf() const {
-			return m_buffer.data();
-		}
-		uint64_t buf_size() const {
-			return m_buffer.size();
-		}
+	const char* buf() const {
+		return m_buffer.data();
+	}
+	uint64_t buf_size() const {
+		return m_buffer.size();
+	}
 
-		StrStream& add_char(char x) {
-			m_buffer.push_back(x);
-			return *this;
-		}
+	StrStream& add_char(char x) {
+		m_buffer.push_back(x);
+		return *this;
+	}
 
-		StrStream& add_float(double x) {
-			fmt::format_to(std::back_inserter(m_buffer), "{:f}", x);
-			//m_buffer.Double(x); // fmt::format_to(std::back_inserter(out), "{:f}", x);
-			return *this;
-		}
+	void add_float(double x) {
+#ifdef __cpp_lib_to_chars
+		char buf[32];
+		auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), x, std::chars_format::fixed);
+		m_buffer.append(buf, ptr);
+#else
+		fmt::format_to(std::back_inserter(m_buffer), FMT_COMPILE("{:f}"), x);
+#endif
+	}
 
-		StrStream& add_int(int64_t x) {
-			fmt::format_to(std::back_inserter(m_buffer), "{}", x);
-			//m_buffer.Int64(x); // fmt::format_to(std::back_inserter(out), "{}", x);
-			return *this;
-		}
+	StrStream& add_int(int64_t x) {
+		fmt::format_int fi(x);
+		m_buffer.append(fi.data(), fi.data() + fi.size());
+		return *this;
+	}
 
-		StrStream& add_uint(uint64_t x) {
-			fmt::format_to(std::back_inserter(m_buffer), "{}", x);
-			//m_buffer.Uint64(x); // fmt::format_to(std::back_inserter(out), "{}", x);
-			return *this;
-		}
+	StrStream& add_uint(uint64_t x) {
+		fmt::format_int fi(x);
+		m_buffer.append(fi.data(), fi.data() + fi.size());
+		return *this;
+	}
 
-		StrStream& add_2(const char* str) {
-			while (str[0] != '\0') {
-				add_char(str[0]);
-				++str;
-			}
-			return *this;
-		}
-	};
+	StrStream& add_3(const char* str, uint64_t len) {
+		m_buffer.append(str, str + len);
+		return *this;
+	}
+};
 
 	class LoadData2 {
 	private:
@@ -2068,6 +2077,8 @@ namespace claujson {
 	private:
 		//                         
 		 static void _write(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty);
+		 static void _write2(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty);
+		 
 		 static void _write(StrStream& stream, const _Value& data, const int depth, bool pretty);
 
 		 static void write_(StrStream& stream, const _Value& global, StructuredPtr temp, bool pretty, bool hint);
@@ -2085,29 +2096,28 @@ namespace claujson {
 		 void write_parallel2(const std::string& fileName, const _Value& j, uint64_t thr_num, bool pretty);
 
 	};
-
 	claujson_inline void _write_string(StrStream& stream, char ch) {
 		switch (ch) {
 		case '\\':
-			stream.add_2("\\\\");
+			stream.add_3("\\\\", 2);
 			break;
 		case '\"':
-			stream.add_2("\\\"");
+			stream.add_3("\\\"", 2);
 			break;
 		case '\n':
-			stream.add_2("\\n");
+			stream.add_3("\\n", 2);
 			break;
 		case '\b':
-			stream.add_2("\\b");
+			stream.add_3("\\b", 2);
 			break;
 		case '\f':
-			stream.add_2("\\f");
+			stream.add_3("\\f", 2);
 			break;
 		case '\r':
-			stream.add_2("\\r");
+			stream.add_3("\\r", 2);
 			break;
 		case '\t':
-			stream.add_2("\\t");
+			stream.add_3("\\t", 2);
 			break;
 		default:
 		{
@@ -2116,11 +2126,11 @@ namespace claujson {
 			{
 				char buf[] = "\\uDDDD";
 				snprintf(buf + 2, 5, "%04X", code);
-				stream.add_2(buf);
+				stream.add_3(buf, 6);
 			}
 			else {
 				char buf[] = { ch, '\0' };
-				stream.add_2(buf);
+				stream.add_3(buf, 1);
 			}
 		}
 		}
@@ -2134,34 +2144,39 @@ namespace claujson {
 		stream.add_char('\"');
 	}
 
-	static    const char* str_open_array[] = { "[", " [ \n",  };
-	static   const  char* str_open_object[] = { "{", " { \n",  };
-	static   const  char* str_close_array[] = { "]", " ] \n", };
-	static   const  char* str_close_object[] = { "}", " } \n", };
-	static   const  char* str_comma[] = { ",", " , " };
-	static   const  char* str_colon[] = { ":", " : " };
-	static   const  char* str_space[] = { "", " " };
+	static  const StringView str_open_array[] = { "["sv, " [ \n"sv, };
+	static     const StringView str_open_object[] = { "{"sv, " { \n"sv, };
+	static    const StringView str_close_array[] = { "]"sv, " ] \n"sv, };
+	static     const StringView str_close_object[] = { "}"sv, " } \n"sv, };
+	static     const StringView str_comma[] = { ","sv, " , "sv };
+	static     const StringView str_colon[] = { ":"sv, " : "sv };
+	static     const StringView str_space[] = { ""sv, " "sv };
 
 	claujson_inline void write_primitive(StrStream& stream, const _Value& x) {
+		// todo - change to switch case
 		if (x.is_str()) {
-
 			write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
-
 		}
-		else if (x.type() == _ValueType::BOOL) {
-			stream.add_2(x.bool_val() ? "true" : "false");
-		}
-		else if (x.type() == _ValueType::FLOAT) {
-			stream.add_float(x.float_val());
-		}
-		else if (x.type() == _ValueType::INT) {
-			stream.add_int(x.int_val());
-		}
-		else if (x.type() == _ValueType::UINT) {
-			stream.add_uint(x.uint_val());
-		}
-		else if (x.type() == _ValueType::NULL_) {
-			stream.add_2("null");
+		else {
+			switch (x.type()) {
+			case _ValueType::BOOL:
+				stream.add_3(x.bool_val() ? "true" : "false", x.bool_val() ? 4 : 5);
+				break;
+			case _ValueType::FLOAT:
+				stream.add_float(x.float_val());
+				break;
+			case _ValueType::INT:
+				stream.add_int(x.int_val());
+				break;
+			case _ValueType::UINT:
+				stream.add_uint(x.uint_val());
+				break;
+			case _ValueType::NULL_:
+				stream.add_3("null", 4);
+				break;
+			default:
+				break;
+			}
 		}
 	}
 	std::string LoadData2::write_to_str(const _Value& global, bool pretty) {
@@ -2171,19 +2186,19 @@ namespace claujson {
 			bool is_arr = global.is_array();
 
 			if (is_arr) {
-				stream.add_2(str_open_array[pretty ? 1 : 0]);
+				stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 			}
 			else {
-				stream.add_2(str_open_object[pretty ? 1 : 0]);
+				stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 			}
 
 			_write(stream, global, 0, pretty);
 
 			if (is_arr) {
-				stream.add_2(str_close_array[pretty ? 1 : 0]);
+				stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 			}
 			else {
-				stream.add_2(str_close_object[pretty ? 1 : 0]);
+				stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 			}
 
 		}
@@ -2195,7 +2210,7 @@ namespace claujson {
 		return std::string(stream.buf(), stream.buf_size());
 	}
 
-		//                           
+	//                           
 	void LoadData2::_write(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty) {
 		StructuredPtr ut;
 
@@ -2213,11 +2228,10 @@ namespace claujson {
 					auto& x = ut.get_key_list(i);
 
 					if (x.is_str()) {
-
 						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
 
 						{
-							stream.add_2(str_colon[pretty ? 1 : 0]);
+							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
 						}
 					}
 					else {
@@ -2227,19 +2241,19 @@ namespace claujson {
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_2(str_open_object[pretty ? 1 : 0]); // "{";
+						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_2(str_open_array[pretty ? 1 : 0]); // "[";
+						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
 					}
 
 					_write(stream, ut.get_value_list(i), chk_list, depth + 1, pretty);
 
 					if (y.is_object() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-						stream.add_2(str_close_object[pretty ? 1 : 0]); // "}";
+						stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size()); // "}";
 					}
 					else if (y.is_array() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-						stream.add_2(str_close_array[pretty ? 1 : 0]); // "]";
+						stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size()); // "]";
 					}
 				}
 				else {
@@ -2249,7 +2263,7 @@ namespace claujson {
 						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
 
 						{
-							stream.add_2(str_colon[pretty ? 1 : 0]); // " : ";
+							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
 						}
 					}
 
@@ -2261,7 +2275,7 @@ namespace claujson {
 				}
 
 				if (i < ut.get_data_size() - 1) {
-					stream.add_2(str_comma[pretty ? 1 : 0]); // ",";
+					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // ",";
 				}
 			}
 		}
@@ -2273,10 +2287,10 @@ namespace claujson {
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_2(str_open_object[pretty ? 1 : 0]); // "{";
+						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_2(str_open_array[pretty ? 1 : 0]); // "[";
+						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
 					}
 
 					_write(stream, ut.get_value_list(i), chk_list, depth + 1, pretty);
@@ -2285,10 +2299,10 @@ namespace claujson {
 
 
 					if (y.is_object() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-						stream.add_2(str_close_object[pretty ? 1 : 0]); // "}";
+						stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size()); // "}";
 					}
 					else if (y.is_array() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-						stream.add_2(str_close_array[pretty ? 1 : 0]); // "]";
+						stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size()); // "]";
 					}
 
 				}
@@ -2300,7 +2314,7 @@ namespace claujson {
 				}
 
 				if (i < ut.get_data_size() - 1) {
-					stream.add_2(str_comma[pretty ? 1 : 0]); // ",";
+					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // ",";
 				}
 			}
 		}
@@ -2336,7 +2350,7 @@ namespace claujson {
 
 
 						{
-							stream.add_2(str_colon[pretty ? 1 : 0]); // " : ";
+							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
 						}
 					}
 					else {
@@ -2346,26 +2360,26 @@ namespace claujson {
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_2(str_open_object[pretty ? 1 : 0]);
+						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_2(str_open_array[pretty ? 1 : 0]);
+						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 					}
 
 					_write(stream, ut.get_value_list(i), depth + 1, pretty);
 
 					if (y.is_object()) {
-						stream.add_2(str_close_object[pretty ? 1 : 0]);
+						stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 					}
 					else if (y.is_array()) {
-						stream.add_2(str_close_array[pretty ? 1 : 0]);
+						stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 					}
 				}
 				else {
 					auto& x = ut.get_key_list(i);
 
 					if (x.is_str()) {
-				
+
 
 						uint64_t len = x.str_val().size();
 						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
@@ -2374,7 +2388,7 @@ namespace claujson {
 
 
 						{
-							stream.add_2(str_colon[pretty ? 1 : 0]);
+							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
 						}
 					}
 
@@ -2386,7 +2400,7 @@ namespace claujson {
 				}
 
 				if (i < ut.get_data_size() - 1) {
-					stream.add_2(str_comma[pretty ? 1 : 0]);
+					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 				}
 			}
 		}
@@ -2398,10 +2412,10 @@ namespace claujson {
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_2(str_open_object[pretty ? 1 : 0]);
+						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_2(str_open_array[pretty ? 1 : 0]);
+						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 					}
 
 					_write(stream, ut.get_value_list(i), depth + 1, pretty);
@@ -2410,10 +2424,10 @@ namespace claujson {
 
 
 					if (y.is_object()) {
-						stream.add_2(str_close_object[pretty ? 1 : 0]);
+						stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 					}
 					else if (y.is_array()) {
-						stream.add_2(str_close_array[pretty ? 1 : 0]);
+						stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 					}
 
 				}
@@ -2424,7 +2438,7 @@ namespace claujson {
 				}
 
 				if (i < ut.get_data_size() - 1) {
-					stream.add_2(str_comma[pretty? 1 : 0]);
+					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 				}
 			}
 		}
@@ -2435,36 +2449,168 @@ namespace claujson {
 		}
 	}
 
+	void LoadData2::_write2(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty) {
+		StructuredPtr _ut;
+
+		if (data.is_structured()) {
+			_ut = StructuredPtr(data);
+		}
+		else {
+			write_primitive(stream, data);
+			return;
+		}
+
+		std_vector<int64_t> _idx_stack; _idx_stack.reserve(1024);
+		std_vector<StructuredPtr> _stack; _stack.reserve(1024);
+		_stack.push_back(_ut); _idx_stack.push_back(0);
+
+		while (_stack.empty() == false) {
+			StructuredPtr ut = _stack.back();
+			_idx_stack.back()++;
+			if (_idx_stack.back() > ut.get_data_size()) {
+				_idx_stack.pop_back();
+				_stack.pop_back();
+
+				if (_stack.empty()) {
+					break;
+				}
+
+				const auto& y = _stack.back().get_value_list(_idx_stack.back() - 1);
+
+				if (y.is_object() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
+					stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size()); // "}";
+				}
+				else if (y.is_array() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
+					stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size()); // "]";
+				}
+
+				const int64_t i = _idx_stack.back() - 1;
+				if (i < _stack.back().get_data_size() - 1) {
+					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+				}
+
+				continue;
+			}
+
+			if (ut && ut.is_object()) {
+				uint64_t len = ut.get_data_size();
+				const int64_t i = _idx_stack.back() - 1;
+				if (ut.get_value_list(i).is_structured()) {
+					auto& x = ut.get_key_list(i);
+
+					if (x.is_str()) {
+						uint64_t len = x.str_val().size();
+
+						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
+
+						{
+							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
+						}
+					}
+					else {
+						//log << warn  << "Error : no key\n"; // chk...
+					}
+
+					auto y = (StructuredPtr(ut.get_value_list(i)));
+
+					if (y.is_object() && y.is_virtual() == false) {
+						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
+					}
+					else if (y.is_array() && y.is_virtual() == false) {
+						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
+					}
+
+					_stack.push_back(ut.get_value_list(i));
+					_idx_stack.push_back(0);
+				}
+				else {
+					auto& x = ut.get_key_list(i);
+
+					if (x.is_str()) {
+
+						uint64_t len = x.str_val().size();
+						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
+
+						{
+							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
+						}
+					}
+
+					{
+						auto& x = ut.get_value_list(i);
+
+						write_primitive(stream, x);
+
+						if (i < ut.get_data_size() - 1) {
+							stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+						}
+					}
+				}
+
+			}
+			else if (ut && ut.is_array()) {
+				uint64_t len = ut.get_data_size();
+				const int64_t i = _idx_stack.back() - 1;
+				if (ut.get_value_list(i).is_structured()) {
+
+					auto y = (StructuredPtr(ut.get_value_list(i)));
+
+					if (y.is_object() && y.is_virtual() == false) {
+						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
+					}
+					else if (y.is_array() && y.is_virtual() == false) {
+						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
+					}
+
+					_stack.push_back(ut.get_value_list(i));
+					_idx_stack.push_back(0);
+				}
+				else {
+					auto& x = ut.get_value_list(i);
+
+					write_primitive(stream, x);
+
+					if (i < ut.get_data_size() - 1) {
+						stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+					}
+				}
+			}
+			else {
+				//
+			}
+		}
+	}
+
 	// todo... just Data has one element 
 	void LoadData2::write(const std::string& fileName, const _Value& global, bool pretty, bool hint) {
 		StrStream stream;
 
 		if (global.is_structured()) {
 			if (hint) {
-				stream.add_2(str_comma[pretty ? 1 : 0]);
+				stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 			}
 			bool is_arr = global.is_array();
 
 			if (is_arr) {
-				stream.add_2(str_open_array[pretty ? 1 : 0]);
+				stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 			}
 			else {
-				stream.add_2(str_open_object[pretty ? 1 : 0]);
+				stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 			}
 
 			_write(stream, global, 1, pretty);
 
 			if (is_arr) {
-				stream.add_2(str_close_array[pretty ? 1 : 0]);
+				stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 			}
 			else {
-				stream.add_2(str_close_object[pretty ? 1 : 0]);
+				stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 			}
 
 		}
 		else {
 			if (hint) {
-				stream.add_2(str_comma[pretty ? 1 : 0]);
+				stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 			}
 			auto& x = global;
 
@@ -2498,31 +2644,31 @@ namespace claujson {
 
 		if (global.is_structured()) {
 			if (hint) {
-				stream.add_2(str_comma[pretty ? 1 : 0]); // stream << ",";
+				stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // stream << ",";
 			}
 
 			StructuredPtr j = global;
 
 
 			if (j.is_array() && j.is_virtual() == false) {
-				stream.add_2(str_open_array[pretty ? 1 : 0]);
+				stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 			}
 			else if (j.is_object() && j.is_virtual() == false) {
-				stream.add_2(str_open_object[pretty ? 1 : 0]);
+				stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 			}
 
-			_write(stream, global, chk_list, 1, pretty);
+			_write2(stream, global, chk_list, 1, pretty);
 
 			if (j.is_array() && std::find(chk_list.begin(), chk_list.end(), j) == chk_list.end()) {
-				stream.add_2(str_close_array[pretty ? 1 : 0]);
+				stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 			}
 			else if (j.is_object() && std::find(chk_list.begin(), chk_list.end(), j) == chk_list.end()) {
-				stream.add_2(str_close_object[pretty ? 1 : 0]);
+				stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 			}
 		}
 		else {
 			if (hint) {
-				stream.add_2(str_comma[pretty ? 1 : 0]);
+				stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 			}
 
 			auto& x = global;
@@ -2530,7 +2676,6 @@ namespace claujson {
 			write_primitive(stream, x);
 		}
 	}
-
 
 	void LoadData2::write_parallel(const std::string& fileName, _Value& j, uint64_t thr_num, bool pretty) {
 

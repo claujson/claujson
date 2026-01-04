@@ -1,9 +1,6 @@
-﻿/* auto-generated on 2025-03-27 15:01:10 -0400. Do not edit! */
+/* auto-generated on 2025-12-17 20:32:36 -0500. version 4.2.4 Do not edit! */
 /* including _simdjson.cpp:  */
 /* begin file _simdjson.cpp */
-
-
-
 #define _SIMDJSON_SRC__SIMDJSON_CPP
 
 /* including base.h: #include <base.h> */
@@ -43,6 +40,11 @@
 #endif
 #endif
 
+// C++ 26
+#if !defined(_SIMDJSON_CPLUSPLUS26) && (_SIMDJSON_CPLUSPLUS >= 202402L) // update when the standard is finalized
+#define _SIMDJSON_CPLUSPLUS26 1
+#endif
+
 // C++ 23
 #if !defined(_SIMDJSON_CPLUSPLUS23) && (_SIMDJSON_CPLUSPLUS >= 202302L)
 #define _SIMDJSON_CPLUSPLUS23 1
@@ -80,10 +82,29 @@
 #endif
 #endif
 
+#ifndef _SIMDJSON_CONSTEXPR_LAMBDA
+#if _SIMDJSON_CPLUSPLUS17
+#define _SIMDJSON_CONSTEXPR_LAMBDA constexpr
+#else
+#define _SIMDJSON_CONSTEXPR_LAMBDA
+#endif
+#endif
+
+
+
 #ifdef __has_include
 #if __has_include(<version>)
 #include <version>
 #endif
+#endif
+
+// The current specification is unclear on how we detect
+// static reflection, both __cpp_lib_reflection and
+// __cpp_impl_reflection are proposed in the draft specification.
+// For now, we disable static reflect by default. It must be
+// specified at compiler time.
+#ifndef _SIMDJSON_STATIC_REFLECTION
+#define _SIMDJSON_STATIC_REFLECTION 0 // disabled by default.
 #endif
 
 #if defined(__apple_build_version__)
@@ -92,17 +113,39 @@
 #endif
 #endif
 
+#if defined(__cpp_lib_ranges) && __cpp_lib_ranges >= 201911L
+#include <ranges>
+#define _SIMDJSON_SUPPORTS_RANGES 1
+#else
+#define _SIMDJSON_SUPPORTS_RANGES 0
+#endif
 
 #if defined(__cpp_concepts) && !defined(_SIMDJSON_CONCEPT_DISABLED)
 #if __cpp_concepts >= 201907L
 #include <utility>
+#define _SIMDJSON_SUPPORTS_CONCEPTS 1
+#else
+#define _SIMDJSON_SUPPORTS_CONCEPTS 0
+#endif
+#else // defined(__cpp_concepts) && !defined(_SIMDJSON_CONCEPT_DISABLED)
+#define _SIMDJSON_SUPPORTS_CONCEPTS 0
+#endif // defined(__cpp_concepts) && !defined(_SIMDJSON_CONCEPT_DISABLED)
+
+// copy _SIMDJSON_SUPPORTS_CONCEPTS to _SIMDJSON_SUPPORTS_DESERIALIZATION.
+#if _SIMDJSON_SUPPORTS_CONCEPTS
 #define _SIMDJSON_SUPPORTS_DESERIALIZATION 1
 #else
 #define _SIMDJSON_SUPPORTS_DESERIALIZATION 0
 #endif
-#else // defined(__cpp_concepts) && !defined(_SIMDJSON_CONCEPT_DISABLED)
-#define _SIMDJSON_SUPPORTS_DESERIALIZATION 0
-#endif // defined(__cpp_concepts) && !defined(_SIMDJSON_CONCEPT_DISABLED)
+
+
+#if !defined(_SIMDJSON_CONSTEVAL)
+#if defined(__cpp_consteval) && __cpp_consteval >= 201811L && defined(__cpp_lib_constexpr_string) && __cpp_lib_constexpr_string >= 201907L
+#define _SIMDJSON_CONSTEVAL 1
+#else
+#define _SIMDJSON_CONSTEVAL 0
+#endif // defined(__cpp_consteval) && __cpp_consteval >= 201811L && defined(__cpp_lib_constexpr_string) && __cpp_lib_constexpr_string >= 201907L
+#endif // !defined(_SIMDJSON_CONSTEVAL)
 
 #endif // _SIMDJSON_COMPILER_CHECK_H
 /* end file _simdjson/compiler_check.h */
@@ -117,7 +160,6 @@
 #include <cfloat>
 #include <cassert>
 #include <climits>
-
 #ifndef _WIN32
 // strcasecmp, strncasecmp
 #include <strings.h>
@@ -156,6 +198,22 @@ using std::size_t;
 #define _SIMDJSON_IS_ARM64 1
 #elif defined(__riscv) && __riscv_xlen == 64
 #define _SIMDJSON_IS_RISCV64 1
+  #if __riscv_v_intrinsic >= 11000
+    #define _SIMDJSON_HAS_RVV_INTRINSICS 1
+  #endif
+
+  #define _SIMDJSON_HAS_ZVBB_INTRINSICS                                          \
+    0 // there is currently no way to detect this
+
+  #if _SIMDJSON_HAS_RVV_INTRINSICS && __riscv_vector &&                          \
+      __riscv_v_min_vlen >= 128 && __riscv_v_elen >= 64
+    // RISC-V V extension
+    #define _SIMDJSON_IS_RVV 1
+    #if _SIMDJSON_HAS_ZVBB_INTRINSICS && __riscv_zvbb >= 1000000
+      // RISC-V Vector Basic Bit-manipulation
+      #define _SIMDJSON_IS_ZVBB 1
+    #endif
+  #endif
 #elif defined(__loongarch_lp64)
 #define _SIMDJSON_IS_LOONGARCH64 1
 #elif defined(__PPC64__) || defined(_M_PPC64)
@@ -201,7 +259,7 @@ using std::size_t;
 // Our fast kernels require 64-bit systems.
 //
 // On 32-bit x86, we lack 64-bit popcnt, lzcnt, blsr instructions.
-// Furthermore, the number of SIMD registers is reduced.
+// Furthermore, the number of _SIMD registers is reduced.
 //
 // On 32-bit ARM, we would have smaller registers.
 //
@@ -302,6 +360,7 @@ using std::size_t;
 #if defined(NDEBUG) || defined(__OPTIMIZE__) || (defined(_MSC_VER) && !defined(_DEBUG))
 // If NDEBUG is set, or __OPTIMIZE__ is set, or we are under MSVC in release mode,
 // then do away with asserts and use __assume.
+// We still recommend that our users set NDEBUG in release mode.
 #if _SIMDJSON_VISUAL_STUDIO
 #define _SIMDJSON_UNREACHABLE() __assume(0)
 #define _SIMDJSON_ASSUME(COND) __assume(COND)
@@ -359,7 +418,6 @@ using std::size_t;
 #endif // _SIMDJSON_PORTABILITY_H
 /* end file _simdjson/portability.h */
 
-
 namespace _simdjson {
 namespace internal {
 /**
@@ -378,7 +436,7 @@ double from_chars(const char *first, const char* end) noexcept;
 }
 
 #ifndef _SIMDJSON_EXCEPTIONS
-#if __cpp_exceptions
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
 #define _SIMDJSON_EXCEPTIONS 1
 #else
 #define _SIMDJSON_EXCEPTIONS 0
@@ -554,17 +612,6 @@ double from_chars(const char *first, const char* end) noexcept;
     // We assume by default static linkage
     #define _SIMDJSON_DLLIMPORTEXPORT
     #endif
-
-/**
- * Workaround for the vcpkg package manager. Only vcpkg should
- * ever touch the next line. The _SIMDJSON_USING_LIBRARY macro is otherwise unused.
- */
-#if _SIMDJSON_USING_LIBRARY
-#define _SIMDJSON_DLLIMPORTEXPORT __declspec(dllimport)
-#endif
-/**
- * End of workaround for the vcpkg package manager.
- */
 #else
     #define _SIMDJSON_DLLIMPORTEXPORT
 #endif
@@ -581,12 +628,14 @@ double from_chars(const char *first, const char* end) noexcept;
 // even if we do not have C++17 support.
 #ifdef __cpp_lib_string_view
 #define _SIMDJSON_HAS_STRING_VIEW
+#include <string_view>
 #endif
 
 // Some systems have string_view even if we do not have C++17 support,
 // and even if __cpp_lib_string_view is undefined, it is the case
 // with Apple clang version 11.
 // We must handle it. *This is important.*
+#ifndef _MSC_VER
 #ifndef _SIMDJSON_HAS_STRING_VIEW
 #if defined __has_include
 // do not combine the next #if with the previous one (unsafe)
@@ -602,6 +651,7 @@ double from_chars(const char *first, const char* end) noexcept;
 #endif // __has_include (<string_view>)
 #endif // defined __has_include
 #endif // def _SIMDJSON_HAS_STRING_VIEW
+#endif // def _MSC_VER
 // end of complicated but important routine to try to detect string_view.
 
 //
@@ -1024,9 +1074,9 @@ using std::operator<<;
 #endif
 
 #if nssv_HAVE_NODISCARD
-# define nssv_nodiscard  [[nodiscard]]
+# define nssv_nodiscard  _simdjson_warn_unused
 #else
-# define nssv_nodiscard  /*[[nodiscard]]*/
+# define nssv_nodiscard  /*_simdjson_warn_unused*/
 #endif
 
 // Additional includes:
@@ -2344,16 +2394,25 @@ namespace std {
 // It could also wrongly set _SIMDJSON_DEVELOPMENT_CHECKS (e.g., if the programmer
 // sets _DEBUG in a release build under Visual Studio, or if some compiler fails to
 // set the __OPTIMIZE__ macro).
+// We make it so that if NDEBUG is defined, then _SIMDJSON_DEVELOPMENT_CHECKS
+// is not defined, irrespective of the compiler.
+// We recommend that users set NDEBUG in release builds, so that
+// _SIMDJSON_DEVELOPMENT_CHECKS is not defined in release builds by default,
+// irrespective of the compiler.
 #ifndef _SIMDJSON_DEVELOPMENT_CHECKS
 #ifdef _MSC_VER
 // Visual Studio seems to set _DEBUG for debug builds.
-#ifdef _DEBUG
+// We set _SIMDJSON_DEVELOPMENT_CHECKS to 1 if _DEBUG is defined
+// and NDEBUG is not defined.
+#if defined(_DEBUG) && !defined(NDEBUG)
 #define _SIMDJSON_DEVELOPMENT_CHECKS 1
 #endif // _DEBUG
 #else // _MSC_VER
 // All other compilers appear to set __OPTIMIZE__ to a positive integer
 // when the compiler is optimizing.
-#ifndef __OPTIMIZE__
+// We only set _SIMDJSON_DEVELOPMENT_CHECKS if both __OPTIMIZE__
+// and NDEBUG are not defined.
+#if !defined(__OPTIMIZE__) && !defined(NDEBUG)
 #define _SIMDJSON_DEVELOPMENT_CHECKS 1
 #endif // __OPTIMIZE__
 #endif // _MSC_VER
@@ -2409,6 +2468,18 @@ namespace std {
 #define _SIMDJSON_AVX512_ALLOWED 1
 #endif
 
+
+#ifndef __has_cpp_attribute
+#define _simdjson_lifetime_bound
+#elif __has_cpp_attribute(msvc::lifetimebound)
+#define _simdjson_lifetime_bound [[msvc::lifetimebound]]
+#elif __has_cpp_attribute(clang::lifetimebound)
+#define _simdjson_lifetime_bound [[clang::lifetimebound]]
+#elif __has_cpp_attribute(lifetimebound)
+#define _simdjson_lifetime_bound [[lifetimebound]]
+#else
+#define _simdjson_lifetime_bound
+#endif
 #endif // _SIMDJSON_COMMON_DEFS_H
 /* end file _simdjson/common_defs.h */
 /* skipped duplicate #include "_simdjson/compiler_check.h" */
@@ -2465,7 +2536,8 @@ enum error_code {
   SCALAR_DOCUMENT_AS_VALUE,   ///< A scalar document is treated as a value.
   OUT_OF_BOUNDS,              ///< Attempted to access location outside of document.
   TRAILING_CONTENT,           ///< Unexpected trailing content in the JSON input
-  NUM_ERROR_CODES
+  OUT_OF_CAPACITY,            ///< The capacity was exceeded, we cannot allocate enough memory.
+  NUM_ERROR_CODES             ///< Placeholder for end of error code list.
 };
 
 /**
@@ -2522,6 +2594,10 @@ namespace internal {
 
 /**
  * The result of a _simdjson operation that could fail.
+ *
+ * IMPORTANT: For the ondemand API, we use implementation__simdjson_result_base<T> as a base class
+ * to avoid some compilation issue. Thus, if you modify this class, please ensure that the ondemand
+ * implementation__simdjson_result_base<T> is also modified.
  *
  * Gives the option of reading error codes, or throwing an exception by casting to the desired result.
  *
@@ -2583,7 +2659,26 @@ struct _simdjson_result_base : protected std::pair<T, error_code> {
    */
   _simdjson_inline error_code error() const noexcept;
 
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_inline bool has_value() const noexcept;
 #if _SIMDJSON_EXCEPTIONS
+
+  /**
+   * Dereference operator to access the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
 
   /**
    * Get the result value.
@@ -2612,20 +2707,53 @@ struct _simdjson_result_base : protected std::pair<T, error_code> {
    * @throw _simdjson_error if there was an error.
    */
   _simdjson_inline operator T&&() && noexcept(false);
+
 #endif // _SIMDJSON_EXCEPTIONS
 
   /**
    * Get the result value. This function is safe if and only
    * the error() method returns a value that evaluates to false.
+   * We discourage the use of value_unsafe().
+   *
+   * The recommended pattern is:
+   *
+   * T value; // where T is the type
+   * auto error = result.get(value);
+   * if (error) {
+   *   // handle error
+   * }
+   *
+   * Or you may call 'value()' which will raise an exception
+   * in case of error:
+   *
+   * T value = result.value();
    */
   _simdjson_inline const T& value_unsafe() const& noexcept;
 
   /**
    * Take the result value (move it). This function is safe if and only
    * the error() method returns a value that evaluates to false.
+   * We discourage the use of value_unsafe().
+   *
+   * The recommended pattern is:
+   *
+   * T value; // where T is the type
+   * auto error = result.get(value);
+   * if (error) {
+   *   // handle error, return, exit, abort
+   * } else {
+   *   // use value here.
+   * }
+   *
+   * Or you may call 'value()' which will raise an exception
+   * in case of error:
+   *
+   * T value = result.value();
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
 
+  using value_type = T;
+  using error_type = error_code;
 }; // struct _simdjson_result_base
 
 } // namespace internal
@@ -2637,6 +2765,7 @@ struct _simdjson_result_base : protected std::pair<T, error_code> {
  */
 template<typename T>
 struct _simdjson_result : public internal::_simdjson_result_base<T> {
+
   /**
    * @private Create a new empty result with error = UNINITIALIZED.
    */
@@ -2670,12 +2799,31 @@ struct _simdjson_result : public internal::_simdjson_result_base<T> {
   _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
+   * Copy the value to a provided std::string, only enabled for std::string_view.
+   *
+   * @param value The variable to assign the value to. May not be set if there is an error.
+   */
+  template <typename U = T>
+  _simdjson_warn_unused _simdjson_inline error_code get(std::string &value) && noexcept {
+    static_assert(std::is_same<U, std::string_view>::value, "SFINAE");
+    std::string_view v;
+    error_code error = std::forward<_simdjson_result<T>>(*this).get(v);
+    if (!error) {
+      value.assign(v.data(), v.size());
+    }
+    return error;
+  }
+
+  /**
    * The error.
    */
   _simdjson_inline error_code error() const noexcept;
 
-#if _SIMDJSON_EXCEPTIONS
 
+
+#if _SIMDJSON_EXCEPTIONS
+  using internal::_simdjson_result_base<T>::operator*;
+  using internal::_simdjson_result_base<T>::operator->;
   /**
    * Get the result value.
    *
@@ -2717,6 +2865,8 @@ struct _simdjson_result : public internal::_simdjson_result_base<T> {
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
 
+  using value_type = T;
+  using error_type = error_code;
 }; // struct _simdjson_result
 
 #if _SIMDJSON_EXCEPTIONS
@@ -2746,7 +2896,7 @@ inline const std::string error_message(int error) noexcept;
 /* begin file _simdjson/concepts.h */
 #ifndef _SIMDJSON_CONCEPTS_H
 #define _SIMDJSON_CONCEPTS_H
-#if _SIMDJSON_SUPPORTS_DESERIALIZATION
+#if _SIMDJSON_SUPPORTS_CONCEPTS
 
 #include <concepts>
 #include <type_traits>
@@ -2778,7 +2928,9 @@ _SIMDJSON_IMPL_CONCEPT(op_append, operator+=)
 #undef _SIMDJSON_IMPL_CONCEPT
 } // namespace details
 
-
+template <typename T>
+concept is_pair = requires { typename T::first_type; typename T::second_type; } &&
+                  std::same_as<T, std::pair<typename T::first_type, typename T::second_type>>;
 template <typename T>
 concept string_view_like = std::is_convertible_v<T, std::string_view> &&
                            !std::is_convertible_v<T, const char*>;
@@ -2861,21 +3013,166 @@ concept optional_type = requires(std::remove_cvref_t<T> obj) {
   { obj.value() } -> std::same_as<typename std::remove_cvref_t<T>::value_type&>;
   requires requires(typename std::remove_cvref_t<T>::value_type &&val) {
     obj.emplace(std::move(val));
-    obj = std::move(val);
     {
       obj.value_or(val)
     } -> std::convertible_to<typename std::remove_cvref_t<T>::value_type>;
   };
   { static_cast<bool>(obj) } -> std::same_as<bool>; // convertible to bool
+  { obj.reset() } noexcept -> std::same_as<void>;
 };
 
 
 
+// Types we serialize as JSON strings (not as containers)
+template <typename T>
+concept string_like =
+  std::is_same_v<std::remove_cvref_t<T>, std::string> ||
+  std::is_same_v<std::remove_cvref_t<T>, std::string_view> ||
+  std::is_same_v<std::remove_cvref_t<T>, const char*> ||
+  std::is_same_v<std::remove_cvref_t<T>, char*>;
+
+// Concept that checks if a type is a container but not a string (because
+// strings handling must be handled differently)
+// Now uses iterator-based approach for broader container support
+template <typename T>
+concept container_but_not_string =
+  std::ranges::input_range<T> && !string_like<T> && !concepts::string_view_keyed_map<T>;
+
+
+
+// Concept: Indexable container that is not a string or associative container
+// Accepts: std::vector, std::array, std::deque (have operator[], value_type, not string_like)
+// Rejects: std::string (string_like), std::list (no operator[]), std::map (has key_type)
+template<typename Container>
+concept indexable_container = requires {
+  typename Container::value_type;
+  requires !concepts::string_like<Container>;
+  requires !requires { typename Container::key_type; };  // Reject maps/sets
+  requires requires(Container& c, std::size_t i) {
+    { c[i] } -> std::convertible_to<typename Container::value_type>;
+  };
+};
+
+
+// Variable template to use with std::meta::substitute
+template<typename Container>
+constexpr bool indexable_container_v = indexable_container<Container>;
+
 } // namespace concepts
+
+
+/**
+ * We use tag_invoke as our customization point mechanism.
+ */
+template <typename Tag, typename... Args>
+concept tag_invocable = requires(Tag tag, Args... args) {
+  tag_invoke(std::forward<Tag>(tag), std::forward<Args>(args)...);
+};
+
+template <typename Tag, typename... Args>
+concept nothrow_tag_invocable =
+    tag_invocable<Tag, Args...> && requires(Tag tag, Args... args) {
+      {
+        tag_invoke(std::forward<Tag>(tag), std::forward<Args>(args)...)
+      } noexcept;
+    };
+
 } // namespace _simdjson
-#endif // _SIMDJSON_SUPPORTS_DESERIALIZATION
+#endif // _SIMDJSON_SUPPORTS_CONCEPTS
 #endif // _SIMDJSON_CONCEPTS_H
 /* end file _simdjson/concepts.h */
+/* including _simdjson/constevalutil.h: #include "_simdjson/constevalutil.h" */
+/* begin file _simdjson/constevalutil.h */
+#ifndef _SIMDJSON_CONSTEVALUTIL_H
+#define _SIMDJSON_CONSTEVALUTIL_H
+
+#include <string>
+#include <string_view>
+#include <array>
+
+namespace _simdjson {
+namespace constevalutil {
+#if _SIMDJSON_CONSTEVAL
+
+constexpr static std::array<uint8_t, 256> json_quotable_character = {
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+constexpr static std::array<std::string_view, 32> control_chars = {
+    "\\u0000", "\\u0001", "\\u0002", "\\u0003", "\\u0004", "\\u0005", "\\u0006",
+    "\\u0007", "\\b", "\\t",     "\\n",     "\\u000b", "\\f",     "\\r",
+    "\\u000e", "\\u000f", "\\u0010", "\\u0011", "\\u0012", "\\u0013", "\\u0014",
+    "\\u0015", "\\u0016", "\\u0017", "\\u0018", "\\u0019", "\\u001a", "\\u001b",
+    "\\u001c", "\\u001d", "\\u001e", "\\u001f"};
+// unoptimized, meant for compile-time execution
+consteval std::string consteval_to_quoted_escaped(std::string_view input) {
+  std::string out = "\"";
+  for (char c : input) {
+    if (json_quotable_character[uint8_t(c)]) {
+      if (c == '"') {
+        out.append("\\\"");
+      } else if (c == '\\') {
+        out.append("\\\\");
+      } else {
+        std::string_view v = control_chars[uint8_t(c)];
+        out.append(v);
+      }
+    } else {
+      out.push_back(c);
+    }
+  }
+  out.push_back('"');
+  return out;
+}
+#endif  // _SIMDJSON_CONSTEVAL
+
+
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <size_t N>
+struct fixed_string {
+    constexpr fixed_string(const char (&str)[N])  {
+        for (std::size_t i = 0; i < N; ++i) {
+            data[i] = str[i];
+        }
+    }
+    char data[N];
+    constexpr std::string_view view() const { return {data, N - 1}; }
+    constexpr size_t size() const { return N ; }
+    constexpr operator std::string_view() const { return view(); }
+    constexpr char operator[](std::size_t index) const { return data[index]; }
+    constexpr bool operator==(const fixed_string& other) const {
+        if (N != other.size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < N; ++i) {
+            if (data[i] != other.data[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+template <std::size_t N>
+fixed_string(const char (&)[N]) -> fixed_string<N>;
+
+template <fixed_string str>
+struct string_constant {
+    static constexpr std::string_view value = str.view();
+};
+#endif // _SIMDJSON_SUPPORTS_CONCEPTS
+
+} // namespace constevalutil
+} // namespace _simdjson
+#endif // _SIMDJSON_CONSTEVALUTIL_H
+/* end file _simdjson/constevalutil.h */
 
 /**
  * @brief The top level _simdjson namespace, containing everything the library provides.
@@ -3750,20 +4047,14 @@ void grisu2(char *buf, int &len, int &decimal_exponent, FloatType value) {
 */
 inline char *append_exponent(char *buf, int e) {
 
-  if (e < 0) {
-    e = -e;
-    *buf++ = '-';
-  } else {
-    *buf++ = '+';
-  }
+  bool isNegative = e < 0;
+  e = isNegative ? -e : e;
+  *buf++ = isNegative  ? '-' : '+';
 
   auto k = static_cast<std::uint32_t>(e);
-  if (k < 10) {
+  if (k < 100) {
     // Always print at least two digits in the exponent.
     // This is for compatibility with printf("%g").
-    *buf++ = '0';
-    *buf++ = static_cast<char>('0' + k);
-  } else if (k < 100) {
     *buf++ = static_cast<char>('0' + k / 10);
     k %= 10;
     *buf++ = static_cast<char>('0' + k);
@@ -4554,7 +4845,39 @@ namespace internal {
     const char* message; // do not use a fancy std::string where a simple C string will do (no alloc, no destructor)
   };
   // These MUST match the codes in error_code. We check this constraint in basictests.
-  extern _SIMDJSON_DLLIMPORTEXPORT const error_code_info error_codes[];
+extern _SIMDJSON_DLLIMPORTEXPORT const error_code_info error_codes[]{
+            { SUCCESS, "SUCCESS: No error" },
+            { CAPACITY, "CAPACITY: This parser can't support a document that big" },
+            { MEMALLOC, "MEMALLOC: Error allocating memory, we're most likely out of memory" },
+            { TAPE_ERROR, "TAPE_ERROR: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc." },
+            { DEPTH_ERROR, "DEPTH_ERROR: The JSON document was too deep (too many nested objects and arrays)" },
+            { STRING_ERROR, "STRING_ERROR: Problem while parsing a string" },
+            { T_ATOM_ERROR, "T_ATOM_ERROR: Problem while parsing an atom starting with the letter 't'" },
+            { F_ATOM_ERROR, "F_ATOM_ERROR: Problem while parsing an atom starting with the letter 'f'" },
+            { N_ATOM_ERROR, "N_ATOM_ERROR: Problem while parsing an atom starting with the letter 'n'" },
+            { NUMBER_ERROR, "NUMBER_ERROR: Problem while parsing a number" },
+            { UTF8_ERROR, "UTF8_ERROR: The input is not valid UTF-8" },
+            { UNINITIALIZED, "UNINITIALIZED: Uninitialized" },
+            { EMPTY, "EMPTY: no JSON found" },
+            { UNESCAPED_CHARS, "UNESCAPED_CHARS: Within strings, some characters must be escaped, we found unescaped characters" },
+            { UNCLOSED_STRING, "UNCLOSED_STRING: A string is opened, but never closed." },
+            { UNSUPPORTED_ARCHITECTURE, "UNSUPPORTED_ARCHITECTURE: simdjson does not have an implementation supported by this CPU architecture. Please report this error to the core team as it should never happen." },
+            { INCORRECT_TYPE, "INCORRECT_TYPE: The JSON element does not have the requested type." },
+            { NUMBER_OUT_OF_RANGE, "NUMBER_OUT_OF_RANGE: The JSON number is too large or too small to fit within the requested type." },
+            { INDEX_OUT_OF_BOUNDS, "INDEX_OUT_OF_BOUNDS: Attempted to access an element of a JSON array that is beyond its length." },
+            { NO_SUCH_FIELD, "NO_SUCH_FIELD: The JSON field referenced does not exist in this object." },
+            { IO_ERROR, "IO_ERROR: Error reading the file." },
+            { INVALID_JSON_POINTER, "INVALID_JSON_POINTER: Invalid JSON pointer syntax." },
+            { INVALID_URI_FRAGMENT, "INVALID_URI_FRAGMENT: Invalid URI fragment syntax." },
+            { UNEXPECTED_ERROR, "UNEXPECTED_ERROR: Unexpected error, consider reporting this problem as you may have found a bug in simdjson" },
+            { PARSER_IN_USE, "PARSER_IN_USE: Cannot parse a new document while a document is still in use." },
+            { OUT_OF_ORDER_ITERATION, "OUT_OF_ORDER_ITERATION: Objects and arrays can only be iterated when they are first encountered." },
+            { INSUFFICIENT_PADDING, "INSUFFICIENT_PADDING: simdjson requires the input JSON string to have at least _SIMDJSON_PADDING extra bytes allocated, beyond the string's length. Consider using the simdjson::padded_string class if needed." },
+            { INCOMPLETE_ARRAY_OR_OBJECT, "INCOMPLETE_ARRAY_OR_OBJECT: JSON document ended early in the middle of an object or array." },
+            { SCALAR_DOCUMENT_AS_VALUE, "SCALAR_DOCUMENT_AS_VALUE: A JSON document made of a scalar (number, Boolean, null or string) is treated as a value. Use get_bool(), get_double(), etc. on the document instead. "},
+            { OUT_OF_BOUNDS, "OUT_OF_BOUNDS: Attempt to access location outside of document."},
+            { TRAILING_CONTENT, "TRAILING_CONTENT: Unexpected trailing content in the JSON input."}
+  }; // error_messages[]
 } // namespace internal
 
 
@@ -4603,7 +4926,37 @@ _simdjson_inline error_code _simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_inline bool _simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+
+template<typename T>
+_simdjson_inline T& _simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& _simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<internal::_simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* _simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* _simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& _simdjson_result_base<T>::value() & noexcept(false) {
@@ -4628,6 +4981,7 @@ _simdjson_inline _simdjson_result_base<T>::operator T&&() && noexcept(false) {
 }
 
 #endif // _SIMDJSON_EXCEPTIONS
+
 
 template<typename T>
 _simdjson_inline const T& _simdjson_result_base<T>::value_unsafe() const& noexcept {
@@ -4664,7 +5018,8 @@ _simdjson_inline void _simdjson_result<T>::tie(T &value, error_code &error) && n
 }
 
 template<typename T>
-_simdjson_warn_unused _simdjson_inline error_code _simdjson_result<T>::get(T &value) && noexcept {
+_simdjson_warn_unused _simdjson_inline error_code
+_simdjson_result<T>::get(T &value) && noexcept {
   return std::forward<internal::_simdjson_result_base<T>>(*this).get(value);
 }
 
@@ -4724,47 +5079,6 @@ _simdjson_inline _simdjson_result<T>::_simdjson_result() noexcept
 
 #endif // _SIMDJSON_ERROR_INL_H
 /* end file _simdjson/error-inl.h */
-
-namespace _simdjson {
-namespace internal {
-
-  _SIMDJSON_DLLIMPORTEXPORT const error_code_info error_codes[] {
-    { SUCCESS, "SUCCESS: No error" },
-    { CAPACITY, "CAPACITY: This parser can't support a document that big" },
-    { MEMALLOC, "MEMALLOC: Error allocating memory, we're most likely out of memory" },
-    { TAPE_ERROR, "TAPE_ERROR: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.  This is a fatal and unrecoverable error." },
-    { DEPTH_ERROR, "DEPTH_ERROR: The JSON document was too deep (too many nested objects and arrays)" },
-    { STRING_ERROR, "STRING_ERROR: Problem while parsing a string" },
-    { T_ATOM_ERROR, "T_ATOM_ERROR: Problem while parsing an atom starting with the letter 't'" },
-    { F_ATOM_ERROR, "F_ATOM_ERROR: Problem while parsing an atom starting with the letter 'f'" },
-    { N_ATOM_ERROR, "N_ATOM_ERROR: Problem while parsing an atom starting with the letter 'n'" },
-    { NUMBER_ERROR, "NUMBER_ERROR: Problem while parsing a number" },
-    { BIGINT_ERROR, "BIGINT_ERROR: Big integer value that cannot be represented using 64 bits" },
-    { UTF8_ERROR, "UTF8_ERROR: The input is not valid UTF-8" },
-    { UNINITIALIZED, "UNINITIALIZED: Uninitialized" },
-    { EMPTY, "EMPTY: no JSON found" },
-    { UNESCAPED_CHARS, "UNESCAPED_CHARS: Within strings, some characters must be escaped, we found unescaped characters" },
-    { UNCLOSED_STRING, "UNCLOSED_STRING: A string is opened, but never closed." },
-    { UNSUPPORTED_ARCHITECTURE, "UNSUPPORTED_ARCHITECTURE: _simdjson does not have an implementation supported by this CPU architecture. Please report this error to the core team as it should never happen." },
-    { INCORRECT_TYPE, "INCORRECT_TYPE: The JSON element does not have the requested type." },
-    { NUMBER_OUT_OF_RANGE, "NUMBER_OUT_OF_RANGE: The JSON number is too large or too small to fit within the requested type." },
-    { INDEX_OUT_OF_BOUNDS, "INDEX_OUT_OF_BOUNDS: Attempted to access an element of a JSON array that is beyond its length." },
-    { NO_SUCH_FIELD, "NO_SUCH_FIELD: The JSON field referenced does not exist in this object." },
-    { IO_ERROR, "IO_ERROR: Error reading the file." },
-    { INVALID_JSON_POINTER, "INVALID_JSON_POINTER: Invalid JSON pointer syntax." },
-    { INVALID_URI_FRAGMENT, "INVALID_URI_FRAGMENT: Invalid URI fragment syntax." },
-    { UNEXPECTED_ERROR, "UNEXPECTED_ERROR: Unexpected error, consider reporting this problem as you may have found a bug in _simdjson" },
-    { PARSER_IN_USE, "PARSER_IN_USE: Cannot parse a new document while a document is still in use." },
-    { OUT_OF_ORDER_ITERATION, "OUT_OF_ORDER_ITERATION: Objects and arrays can only be iterated when they are first encountered." },
-    { INSUFFICIENT_PADDING, "INSUFFICIENT_PADDING: _simdjson requires the input JSON string to have at least _SIMDJSON_PADDING extra bytes allocated, beyond the string's length. Consider using the _simdjson::padded_string class if needed." },
-    { INCOMPLETE_ARRAY_OR_OBJECT, "INCOMPLETE_ARRAY_OR_OBJECT: JSON document ended early in the middle of an object or array. This is a fatal and unrecoverable error." },
-    { SCALAR_DOCUMENT_AS_VALUE, "SCALAR_DOCUMENT_AS_VALUE: A JSON document made of a scalar (number, Boolean, null or string) is treated as a value. Use get_bool(), get_double(), etc. on the document instead. "},
-    { OUT_OF_BOUNDS, "OUT_OF_BOUNDS: Attempt to access location outside of document."},
-    { TRAILING_CONTENT, "TRAILING_CONTENT: Unexpected trailing content in the JSON input."}
-  }; // error_messages[]
-
-} // namespace internal
-} // namespace _simdjson
 
 #endif // _SIMDJSON_SRC_ERROR_TABLES_CPP
 /* end file internal/error_tables.cpp */
@@ -5030,7 +5344,665 @@ extern _SIMDJSON_DLLIMPORTEXPORT const double power_of_ten[];
 // The truncated powers of five from 5^-342 all the way to 5^308
 // The mantissa is truncated to 128 bits, and
 // never rounded up. Uses about 10KB.
-extern _SIMDJSON_DLLIMPORTEXPORT const uint64_t power_of_five_128[];
+// We use the template trick to allow inclusion in multiple translation units.
+#if _SIMDJSON_STATIC_REFLECTION
+template <typename unused = void>  struct powers_template {
+constexpr static uint64_t power_of_five_128[651*2]= {
+        0xeef453d6923bd65a,0x113faa2906a13b3f,
+        0x9558b4661b6565f8,0x4ac7ca59a424c507,
+        0xbaaee17fa23ebf76,0x5d79bcf00d2df649,
+        0xe95a99df8ace6f53,0xf4d82c2c107973dc,
+        0x91d8a02bb6c10594,0x79071b9b8a4be869,
+        0xb64ec836a47146f9,0x9748e2826cdee284,
+        0xe3e27a444d8d98b7,0xfd1b1b2308169b25,
+        0x8e6d8c6ab0787f72,0xfe30f0f5e50e20f7,
+        0xb208ef855c969f4f,0xbdbd2d335e51a935,
+        0xde8b2b66b3bc4723,0xad2c788035e61382,
+        0x8b16fb203055ac76,0x4c3bcb5021afcc31,
+        0xaddcb9e83c6b1793,0xdf4abe242a1bbf3d,
+        0xd953e8624b85dd78,0xd71d6dad34a2af0d,
+        0x87d4713d6f33aa6b,0x8672648c40e5ad68,
+        0xa9c98d8ccb009506,0x680efdaf511f18c2,
+        0xd43bf0effdc0ba48,0x212bd1b2566def2,
+        0x84a57695fe98746d,0x14bb630f7604b57,
+        0xa5ced43b7e3e9188,0x419ea3bd35385e2d,
+        0xcf42894a5dce35ea,0x52064cac828675b9,
+        0x818995ce7aa0e1b2,0x7343efebd1940993,
+        0xa1ebfb4219491a1f,0x1014ebe6c5f90bf8,
+        0xca66fa129f9b60a6,0xd41a26e077774ef6,
+        0xfd00b897478238d0,0x8920b098955522b4,
+        0x9e20735e8cb16382,0x55b46e5f5d5535b0,
+        0xc5a890362fddbc62,0xeb2189f734aa831d,
+        0xf712b443bbd52b7b,0xa5e9ec7501d523e4,
+        0x9a6bb0aa55653b2d,0x47b233c92125366e,
+        0xc1069cd4eabe89f8,0x999ec0bb696e840a,
+        0xf148440a256e2c76,0xc00670ea43ca250d,
+        0x96cd2a865764dbca,0x380406926a5e5728,
+        0xbc807527ed3e12bc,0xc605083704f5ecf2,
+        0xeba09271e88d976b,0xf7864a44c633682e,
+        0x93445b8731587ea3,0x7ab3ee6afbe0211d,
+        0xb8157268fdae9e4c,0x5960ea05bad82964,
+        0xe61acf033d1a45df,0x6fb92487298e33bd,
+        0x8fd0c16206306bab,0xa5d3b6d479f8e056,
+        0xb3c4f1ba87bc8696,0x8f48a4899877186c,
+        0xe0b62e2929aba83c,0x331acdabfe94de87,
+        0x8c71dcd9ba0b4925,0x9ff0c08b7f1d0b14,
+        0xaf8e5410288e1b6f,0x7ecf0ae5ee44dd9,
+        0xdb71e91432b1a24a,0xc9e82cd9f69d6150,
+        0x892731ac9faf056e,0xbe311c083a225cd2,
+        0xab70fe17c79ac6ca,0x6dbd630a48aaf406,
+        0xd64d3d9db981787d,0x92cbbccdad5b108,
+        0x85f0468293f0eb4e,0x25bbf56008c58ea5,
+        0xa76c582338ed2621,0xaf2af2b80af6f24e,
+        0xd1476e2c07286faa,0x1af5af660db4aee1,
+        0x82cca4db847945ca,0x50d98d9fc890ed4d,
+        0xa37fce126597973c,0xe50ff107bab528a0,
+        0xcc5fc196fefd7d0c,0x1e53ed49a96272c8,
+        0xff77b1fcbebcdc4f,0x25e8e89c13bb0f7a,
+        0x9faacf3df73609b1,0x77b191618c54e9ac,
+        0xc795830d75038c1d,0xd59df5b9ef6a2417,
+        0xf97ae3d0d2446f25,0x4b0573286b44ad1d,
+        0x9becce62836ac577,0x4ee367f9430aec32,
+        0xc2e801fb244576d5,0x229c41f793cda73f,
+        0xf3a20279ed56d48a,0x6b43527578c1110f,
+        0x9845418c345644d6,0x830a13896b78aaa9,
+        0xbe5691ef416bd60c,0x23cc986bc656d553,
+        0xedec366b11c6cb8f,0x2cbfbe86b7ec8aa8,
+        0x94b3a202eb1c3f39,0x7bf7d71432f3d6a9,
+        0xb9e08a83a5e34f07,0xdaf5ccd93fb0cc53,
+        0xe858ad248f5c22c9,0xd1b3400f8f9cff68,
+        0x91376c36d99995be,0x23100809b9c21fa1,
+        0xb58547448ffffb2d,0xabd40a0c2832a78a,
+        0xe2e69915b3fff9f9,0x16c90c8f323f516c,
+        0x8dd01fad907ffc3b,0xae3da7d97f6792e3,
+        0xb1442798f49ffb4a,0x99cd11cfdf41779c,
+        0xdd95317f31c7fa1d,0x40405643d711d583,
+        0x8a7d3eef7f1cfc52,0x482835ea666b2572,
+        0xad1c8eab5ee43b66,0xda3243650005eecf,
+        0xd863b256369d4a40,0x90bed43e40076a82,
+        0x873e4f75e2224e68,0x5a7744a6e804a291,
+        0xa90de3535aaae202,0x711515d0a205cb36,
+        0xd3515c2831559a83,0xd5a5b44ca873e03,
+        0x8412d9991ed58091,0xe858790afe9486c2,
+        0xa5178fff668ae0b6,0x626e974dbe39a872,
+        0xce5d73ff402d98e3,0xfb0a3d212dc8128f,
+        0x80fa687f881c7f8e,0x7ce66634bc9d0b99,
+        0xa139029f6a239f72,0x1c1fffc1ebc44e80,
+        0xc987434744ac874e,0xa327ffb266b56220,
+        0xfbe9141915d7a922,0x4bf1ff9f0062baa8,
+        0x9d71ac8fada6c9b5,0x6f773fc3603db4a9,
+        0xc4ce17b399107c22,0xcb550fb4384d21d3,
+        0xf6019da07f549b2b,0x7e2a53a146606a48,
+        0x99c102844f94e0fb,0x2eda7444cbfc426d,
+        0xc0314325637a1939,0xfa911155fefb5308,
+        0xf03d93eebc589f88,0x793555ab7eba27ca,
+        0x96267c7535b763b5,0x4bc1558b2f3458de,
+        0xbbb01b9283253ca2,0x9eb1aaedfb016f16,
+        0xea9c227723ee8bcb,0x465e15a979c1cadc,
+        0x92a1958a7675175f,0xbfacd89ec191ec9,
+        0xb749faed14125d36,0xcef980ec671f667b,
+        0xe51c79a85916f484,0x82b7e12780e7401a,
+        0x8f31cc0937ae58d2,0xd1b2ecb8b0908810,
+        0xb2fe3f0b8599ef07,0x861fa7e6dcb4aa15,
+        0xdfbdcece67006ac9,0x67a791e093e1d49a,
+        0x8bd6a141006042bd,0xe0c8bb2c5c6d24e0,
+        0xaecc49914078536d,0x58fae9f773886e18,
+        0xda7f5bf590966848,0xaf39a475506a899e,
+        0x888f99797a5e012d,0x6d8406c952429603,
+        0xaab37fd7d8f58178,0xc8e5087ba6d33b83,
+        0xd5605fcdcf32e1d6,0xfb1e4a9a90880a64,
+        0x855c3be0a17fcd26,0x5cf2eea09a55067f,
+        0xa6b34ad8c9dfc06f,0xf42faa48c0ea481e,
+        0xd0601d8efc57b08b,0xf13b94daf124da26,
+        0x823c12795db6ce57,0x76c53d08d6b70858,
+        0xa2cb1717b52481ed,0x54768c4b0c64ca6e,
+        0xcb7ddcdda26da268,0xa9942f5dcf7dfd09,
+        0xfe5d54150b090b02,0xd3f93b35435d7c4c,
+        0x9efa548d26e5a6e1,0xc47bc5014a1a6daf,
+        0xc6b8e9b0709f109a,0x359ab6419ca1091b,
+        0xf867241c8cc6d4c0,0xc30163d203c94b62,
+        0x9b407691d7fc44f8,0x79e0de63425dcf1d,
+        0xc21094364dfb5636,0x985915fc12f542e4,
+        0xf294b943e17a2bc4,0x3e6f5b7b17b2939d,
+        0x979cf3ca6cec5b5a,0xa705992ceecf9c42,
+        0xbd8430bd08277231,0x50c6ff782a838353,
+        0xece53cec4a314ebd,0xa4f8bf5635246428,
+        0x940f4613ae5ed136,0x871b7795e136be99,
+        0xb913179899f68584,0x28e2557b59846e3f,
+        0xe757dd7ec07426e5,0x331aeada2fe589cf,
+        0x9096ea6f3848984f,0x3ff0d2c85def7621,
+        0xb4bca50b065abe63,0xfed077a756b53a9,
+        0xe1ebce4dc7f16dfb,0xd3e8495912c62894,
+        0x8d3360f09cf6e4bd,0x64712dd7abbbd95c,
+        0xb080392cc4349dec,0xbd8d794d96aacfb3,
+        0xdca04777f541c567,0xecf0d7a0fc5583a0,
+        0x89e42caaf9491b60,0xf41686c49db57244,
+        0xac5d37d5b79b6239,0x311c2875c522ced5,
+        0xd77485cb25823ac7,0x7d633293366b828b,
+        0x86a8d39ef77164bc,0xae5dff9c02033197,
+        0xa8530886b54dbdeb,0xd9f57f830283fdfc,
+        0xd267caa862a12d66,0xd072df63c324fd7b,
+        0x8380dea93da4bc60,0x4247cb9e59f71e6d,
+        0xa46116538d0deb78,0x52d9be85f074e608,
+        0xcd795be870516656,0x67902e276c921f8b,
+        0x806bd9714632dff6,0xba1cd8a3db53b6,
+        0xa086cfcd97bf97f3,0x80e8a40eccd228a4,
+        0xc8a883c0fdaf7df0,0x6122cd128006b2cd,
+        0xfad2a4b13d1b5d6c,0x796b805720085f81,
+        0x9cc3a6eec6311a63,0xcbe3303674053bb0,
+        0xc3f490aa77bd60fc,0xbedbfc4411068a9c,
+        0xf4f1b4d515acb93b,0xee92fb5515482d44,
+        0x991711052d8bf3c5,0x751bdd152d4d1c4a,
+        0xbf5cd54678eef0b6,0xd262d45a78a0635d,
+        0xef340a98172aace4,0x86fb897116c87c34,
+        0x9580869f0e7aac0e,0xd45d35e6ae3d4da0,
+        0xbae0a846d2195712,0x8974836059cca109,
+        0xe998d258869facd7,0x2bd1a438703fc94b,
+        0x91ff83775423cc06,0x7b6306a34627ddcf,
+        0xb67f6455292cbf08,0x1a3bc84c17b1d542,
+        0xe41f3d6a7377eeca,0x20caba5f1d9e4a93,
+        0x8e938662882af53e,0x547eb47b7282ee9c,
+        0xb23867fb2a35b28d,0xe99e619a4f23aa43,
+        0xdec681f9f4c31f31,0x6405fa00e2ec94d4,
+        0x8b3c113c38f9f37e,0xde83bc408dd3dd04,
+        0xae0b158b4738705e,0x9624ab50b148d445,
+        0xd98ddaee19068c76,0x3badd624dd9b0957,
+        0x87f8a8d4cfa417c9,0xe54ca5d70a80e5d6,
+        0xa9f6d30a038d1dbc,0x5e9fcf4ccd211f4c,
+        0xd47487cc8470652b,0x7647c3200069671f,
+        0x84c8d4dfd2c63f3b,0x29ecd9f40041e073,
+        0xa5fb0a17c777cf09,0xf468107100525890,
+        0xcf79cc9db955c2cc,0x7182148d4066eeb4,
+        0x81ac1fe293d599bf,0xc6f14cd848405530,
+        0xa21727db38cb002f,0xb8ada00e5a506a7c,
+        0xca9cf1d206fdc03b,0xa6d90811f0e4851c,
+        0xfd442e4688bd304a,0x908f4a166d1da663,
+        0x9e4a9cec15763e2e,0x9a598e4e043287fe,
+        0xc5dd44271ad3cdba,0x40eff1e1853f29fd,
+        0xf7549530e188c128,0xd12bee59e68ef47c,
+        0x9a94dd3e8cf578b9,0x82bb74f8301958ce,
+        0xc13a148e3032d6e7,0xe36a52363c1faf01,
+        0xf18899b1bc3f8ca1,0xdc44e6c3cb279ac1,
+        0x96f5600f15a7b7e5,0x29ab103a5ef8c0b9,
+        0xbcb2b812db11a5de,0x7415d448f6b6f0e7,
+        0xebdf661791d60f56,0x111b495b3464ad21,
+        0x936b9fcebb25c995,0xcab10dd900beec34,
+        0xb84687c269ef3bfb,0x3d5d514f40eea742,
+        0xe65829b3046b0afa,0xcb4a5a3112a5112,
+        0x8ff71a0fe2c2e6dc,0x47f0e785eaba72ab,
+        0xb3f4e093db73a093,0x59ed216765690f56,
+        0xe0f218b8d25088b8,0x306869c13ec3532c,
+        0x8c974f7383725573,0x1e414218c73a13fb,
+        0xafbd2350644eeacf,0xe5d1929ef90898fa,
+        0xdbac6c247d62a583,0xdf45f746b74abf39,
+        0x894bc396ce5da772,0x6b8bba8c328eb783,
+        0xab9eb47c81f5114f,0x66ea92f3f326564,
+        0xd686619ba27255a2,0xc80a537b0efefebd,
+        0x8613fd0145877585,0xbd06742ce95f5f36,
+        0xa798fc4196e952e7,0x2c48113823b73704,
+        0xd17f3b51fca3a7a0,0xf75a15862ca504c5,
+        0x82ef85133de648c4,0x9a984d73dbe722fb,
+        0xa3ab66580d5fdaf5,0xc13e60d0d2e0ebba,
+        0xcc963fee10b7d1b3,0x318df905079926a8,
+        0xffbbcfe994e5c61f,0xfdf17746497f7052,
+        0x9fd561f1fd0f9bd3,0xfeb6ea8bedefa633,
+        0xc7caba6e7c5382c8,0xfe64a52ee96b8fc0,
+        0xf9bd690a1b68637b,0x3dfdce7aa3c673b0,
+        0x9c1661a651213e2d,0x6bea10ca65c084e,
+        0xc31bfa0fe5698db8,0x486e494fcff30a62,
+        0xf3e2f893dec3f126,0x5a89dba3c3efccfa,
+        0x986ddb5c6b3a76b7,0xf89629465a75e01c,
+        0xbe89523386091465,0xf6bbb397f1135823,
+        0xee2ba6c0678b597f,0x746aa07ded582e2c,
+        0x94db483840b717ef,0xa8c2a44eb4571cdc,
+        0xba121a4650e4ddeb,0x92f34d62616ce413,
+        0xe896a0d7e51e1566,0x77b020baf9c81d17,
+        0x915e2486ef32cd60,0xace1474dc1d122e,
+        0xb5b5ada8aaff80b8,0xd819992132456ba,
+        0xe3231912d5bf60e6,0x10e1fff697ed6c69,
+        0x8df5efabc5979c8f,0xca8d3ffa1ef463c1,
+        0xb1736b96b6fd83b3,0xbd308ff8a6b17cb2,
+        0xddd0467c64bce4a0,0xac7cb3f6d05ddbde,
+        0x8aa22c0dbef60ee4,0x6bcdf07a423aa96b,
+        0xad4ab7112eb3929d,0x86c16c98d2c953c6,
+        0xd89d64d57a607744,0xe871c7bf077ba8b7,
+        0x87625f056c7c4a8b,0x11471cd764ad4972,
+        0xa93af6c6c79b5d2d,0xd598e40d3dd89bcf,
+        0xd389b47879823479,0x4aff1d108d4ec2c3,
+        0x843610cb4bf160cb,0xcedf722a585139ba,
+        0xa54394fe1eedb8fe,0xc2974eb4ee658828,
+        0xce947a3da6a9273e,0x733d226229feea32,
+        0x811ccc668829b887,0x806357d5a3f525f,
+        0xa163ff802a3426a8,0xca07c2dcb0cf26f7,
+        0xc9bcff6034c13052,0xfc89b393dd02f0b5,
+        0xfc2c3f3841f17c67,0xbbac2078d443ace2,
+        0x9d9ba7832936edc0,0xd54b944b84aa4c0d,
+        0xc5029163f384a931,0xa9e795e65d4df11,
+        0xf64335bcf065d37d,0x4d4617b5ff4a16d5,
+        0x99ea0196163fa42e,0x504bced1bf8e4e45,
+        0xc06481fb9bcf8d39,0xe45ec2862f71e1d6,
+        0xf07da27a82c37088,0x5d767327bb4e5a4c,
+        0x964e858c91ba2655,0x3a6a07f8d510f86f,
+        0xbbe226efb628afea,0x890489f70a55368b,
+        0xeadab0aba3b2dbe5,0x2b45ac74ccea842e,
+        0x92c8ae6b464fc96f,0x3b0b8bc90012929d,
+        0xb77ada0617e3bbcb,0x9ce6ebb40173744,
+        0xe55990879ddcaabd,0xcc420a6a101d0515,
+        0x8f57fa54c2a9eab6,0x9fa946824a12232d,
+        0xb32df8e9f3546564,0x47939822dc96abf9,
+        0xdff9772470297ebd,0x59787e2b93bc56f7,
+        0x8bfbea76c619ef36,0x57eb4edb3c55b65a,
+        0xaefae51477a06b03,0xede622920b6b23f1,
+        0xdab99e59958885c4,0xe95fab368e45eced,
+        0x88b402f7fd75539b,0x11dbcb0218ebb414,
+        0xaae103b5fcd2a881,0xd652bdc29f26a119,
+        0xd59944a37c0752a2,0x4be76d3346f0495f,
+        0x857fcae62d8493a5,0x6f70a4400c562ddb,
+        0xa6dfbd9fb8e5b88e,0xcb4ccd500f6bb952,
+        0xd097ad07a71f26b2,0x7e2000a41346a7a7,
+        0x825ecc24c873782f,0x8ed400668c0c28c8,
+        0xa2f67f2dfa90563b,0x728900802f0f32fa,
+        0xcbb41ef979346bca,0x4f2b40a03ad2ffb9,
+        0xfea126b7d78186bc,0xe2f610c84987bfa8,
+        0x9f24b832e6b0f436,0xdd9ca7d2df4d7c9,
+        0xc6ede63fa05d3143,0x91503d1c79720dbb,
+        0xf8a95fcf88747d94,0x75a44c6397ce912a,
+        0x9b69dbe1b548ce7c,0xc986afbe3ee11aba,
+        0xc24452da229b021b,0xfbe85badce996168,
+        0xf2d56790ab41c2a2,0xfae27299423fb9c3,
+        0x97c560ba6b0919a5,0xdccd879fc967d41a,
+        0xbdb6b8e905cb600f,0x5400e987bbc1c920,
+        0xed246723473e3813,0x290123e9aab23b68,
+        0x9436c0760c86e30b,0xf9a0b6720aaf6521,
+        0xb94470938fa89bce,0xf808e40e8d5b3e69,
+        0xe7958cb87392c2c2,0xb60b1d1230b20e04,
+        0x90bd77f3483bb9b9,0xb1c6f22b5e6f48c2,
+        0xb4ecd5f01a4aa828,0x1e38aeb6360b1af3,
+        0xe2280b6c20dd5232,0x25c6da63c38de1b0,
+        0x8d590723948a535f,0x579c487e5a38ad0e,
+        0xb0af48ec79ace837,0x2d835a9df0c6d851,
+        0xdcdb1b2798182244,0xf8e431456cf88e65,
+        0x8a08f0f8bf0f156b,0x1b8e9ecb641b58ff,
+        0xac8b2d36eed2dac5,0xe272467e3d222f3f,
+        0xd7adf884aa879177,0x5b0ed81dcc6abb0f,
+        0x86ccbb52ea94baea,0x98e947129fc2b4e9,
+        0xa87fea27a539e9a5,0x3f2398d747b36224,
+        0xd29fe4b18e88640e,0x8eec7f0d19a03aad,
+        0x83a3eeeef9153e89,0x1953cf68300424ac,
+        0xa48ceaaab75a8e2b,0x5fa8c3423c052dd7,
+        0xcdb02555653131b6,0x3792f412cb06794d,
+        0x808e17555f3ebf11,0xe2bbd88bbee40bd0,
+        0xa0b19d2ab70e6ed6,0x5b6aceaeae9d0ec4,
+        0xc8de047564d20a8b,0xf245825a5a445275,
+        0xfb158592be068d2e,0xeed6e2f0f0d56712,
+        0x9ced737bb6c4183d,0x55464dd69685606b,
+        0xc428d05aa4751e4c,0xaa97e14c3c26b886,
+        0xf53304714d9265df,0xd53dd99f4b3066a8,
+        0x993fe2c6d07b7fab,0xe546a8038efe4029,
+        0xbf8fdb78849a5f96,0xde98520472bdd033,
+        0xef73d256a5c0f77c,0x963e66858f6d4440,
+        0x95a8637627989aad,0xdde7001379a44aa8,
+        0xbb127c53b17ec159,0x5560c018580d5d52,
+        0xe9d71b689dde71af,0xaab8f01e6e10b4a6,
+        0x9226712162ab070d,0xcab3961304ca70e8,
+        0xb6b00d69bb55c8d1,0x3d607b97c5fd0d22,
+        0xe45c10c42a2b3b05,0x8cb89a7db77c506a,
+        0x8eb98a7a9a5b04e3,0x77f3608e92adb242,
+        0xb267ed1940f1c61c,0x55f038b237591ed3,
+        0xdf01e85f912e37a3,0x6b6c46dec52f6688,
+        0x8b61313bbabce2c6,0x2323ac4b3b3da015,
+        0xae397d8aa96c1b77,0xabec975e0a0d081a,
+        0xd9c7dced53c72255,0x96e7bd358c904a21,
+        0x881cea14545c7575,0x7e50d64177da2e54,
+        0xaa242499697392d2,0xdde50bd1d5d0b9e9,
+        0xd4ad2dbfc3d07787,0x955e4ec64b44e864,
+        0x84ec3c97da624ab4,0xbd5af13bef0b113e,
+        0xa6274bbdd0fadd61,0xecb1ad8aeacdd58e,
+        0xcfb11ead453994ba,0x67de18eda5814af2,
+        0x81ceb32c4b43fcf4,0x80eacf948770ced7,
+        0xa2425ff75e14fc31,0xa1258379a94d028d,
+        0xcad2f7f5359a3b3e,0x96ee45813a04330,
+        0xfd87b5f28300ca0d,0x8bca9d6e188853fc,
+        0x9e74d1b791e07e48,0x775ea264cf55347e,
+        0xc612062576589dda,0x95364afe032a81a0,
+        0xf79687aed3eec551,0x3a83ddbd83f52210,
+        0x9abe14cd44753b52,0xc4926a9672793580,
+        0xc16d9a0095928a27,0x75b7053c0f178400,
+        0xf1c90080baf72cb1,0x5324c68b12dd6800,
+        0x971da05074da7bee,0xd3f6fc16ebca8000,
+        0xbce5086492111aea,0x88f4bb1ca6bd0000,
+        0xec1e4a7db69561a5,0x2b31e9e3d0700000,
+        0x9392ee8e921d5d07,0x3aff322e62600000,
+        0xb877aa3236a4b449,0x9befeb9fad487c3,
+        0xe69594bec44de15b,0x4c2ebe687989a9b4,
+        0x901d7cf73ab0acd9,0xf9d37014bf60a11,
+        0xb424dc35095cd80f,0x538484c19ef38c95,
+        0xe12e13424bb40e13,0x2865a5f206b06fba,
+        0x8cbccc096f5088cb,0xf93f87b7442e45d4,
+        0xafebff0bcb24aafe,0xf78f69a51539d749,
+        0xdbe6fecebdedd5be,0xb573440e5a884d1c,
+        0x89705f4136b4a597,0x31680a88f8953031,
+        0xabcc77118461cefc,0xfdc20d2b36ba7c3e,
+        0xd6bf94d5e57a42bc,0x3d32907604691b4d,
+        0x8637bd05af6c69b5,0xa63f9a49c2c1b110,
+        0xa7c5ac471b478423,0xfcf80dc33721d54,
+        0xd1b71758e219652b,0xd3c36113404ea4a9,
+        0x83126e978d4fdf3b,0x645a1cac083126ea,
+        0xa3d70a3d70a3d70a,0x3d70a3d70a3d70a4,
+        0xcccccccccccccccc,0xcccccccccccccccd,
+        0x8000000000000000,0x0,
+        0xa000000000000000,0x0,
+        0xc800000000000000,0x0,
+        0xfa00000000000000,0x0,
+        0x9c40000000000000,0x0,
+        0xc350000000000000,0x0,
+        0xf424000000000000,0x0,
+        0x9896800000000000,0x0,
+        0xbebc200000000000,0x0,
+        0xee6b280000000000,0x0,
+        0x9502f90000000000,0x0,
+        0xba43b74000000000,0x0,
+        0xe8d4a51000000000,0x0,
+        0x9184e72a00000000,0x0,
+        0xb5e620f480000000,0x0,
+        0xe35fa931a0000000,0x0,
+        0x8e1bc9bf04000000,0x0,
+        0xb1a2bc2ec5000000,0x0,
+        0xde0b6b3a76400000,0x0,
+        0x8ac7230489e80000,0x0,
+        0xad78ebc5ac620000,0x0,
+        0xd8d726b7177a8000,0x0,
+        0x878678326eac9000,0x0,
+        0xa968163f0a57b400,0x0,
+        0xd3c21bcecceda100,0x0,
+        0x84595161401484a0,0x0,
+        0xa56fa5b99019a5c8,0x0,
+        0xcecb8f27f4200f3a,0x0,
+        0x813f3978f8940984,0x4000000000000000,
+        0xa18f07d736b90be5,0x5000000000000000,
+        0xc9f2c9cd04674ede,0xa400000000000000,
+        0xfc6f7c4045812296,0x4d00000000000000,
+        0x9dc5ada82b70b59d,0xf020000000000000,
+        0xc5371912364ce305,0x6c28000000000000,
+        0xf684df56c3e01bc6,0xc732000000000000,
+        0x9a130b963a6c115c,0x3c7f400000000000,
+        0xc097ce7bc90715b3,0x4b9f100000000000,
+        0xf0bdc21abb48db20,0x1e86d40000000000,
+        0x96769950b50d88f4,0x1314448000000000,
+        0xbc143fa4e250eb31,0x17d955a000000000,
+        0xeb194f8e1ae525fd,0x5dcfab0800000000,
+        0x92efd1b8d0cf37be,0x5aa1cae500000000,
+        0xb7abc627050305ad,0xf14a3d9e40000000,
+        0xe596b7b0c643c719,0x6d9ccd05d0000000,
+        0x8f7e32ce7bea5c6f,0xe4820023a2000000,
+        0xb35dbf821ae4f38b,0xdda2802c8a800000,
+        0xe0352f62a19e306e,0xd50b2037ad200000,
+        0x8c213d9da502de45,0x4526f422cc340000,
+        0xaf298d050e4395d6,0x9670b12b7f410000,
+        0xdaf3f04651d47b4c,0x3c0cdd765f114000,
+        0x88d8762bf324cd0f,0xa5880a69fb6ac800,
+        0xab0e93b6efee0053,0x8eea0d047a457a00,
+        0xd5d238a4abe98068,0x72a4904598d6d880,
+        0x85a36366eb71f041,0x47a6da2b7f864750,
+        0xa70c3c40a64e6c51,0x999090b65f67d924,
+        0xd0cf4b50cfe20765,0xfff4b4e3f741cf6d,
+        0x82818f1281ed449f,0xbff8f10e7a8921a4,
+        0xa321f2d7226895c7,0xaff72d52192b6a0d,
+        0xcbea6f8ceb02bb39,0x9bf4f8a69f764490,
+        0xfee50b7025c36a08,0x2f236d04753d5b4,
+        0x9f4f2726179a2245,0x1d762422c946590,
+        0xc722f0ef9d80aad6,0x424d3ad2b7b97ef5,
+        0xf8ebad2b84e0d58b,0xd2e0898765a7deb2,
+        0x9b934c3b330c8577,0x63cc55f49f88eb2f,
+        0xc2781f49ffcfa6d5,0x3cbf6b71c76b25fb,
+        0xf316271c7fc3908a,0x8bef464e3945ef7a,
+        0x97edd871cfda3a56,0x97758bf0e3cbb5ac,
+        0xbde94e8e43d0c8ec,0x3d52eeed1cbea317,
+        0xed63a231d4c4fb27,0x4ca7aaa863ee4bdd,
+        0x945e455f24fb1cf8,0x8fe8caa93e74ef6a,
+        0xb975d6b6ee39e436,0xb3e2fd538e122b44,
+        0xe7d34c64a9c85d44,0x60dbbca87196b616,
+        0x90e40fbeea1d3a4a,0xbc8955e946fe31cd,
+        0xb51d13aea4a488dd,0x6babab6398bdbe41,
+        0xe264589a4dcdab14,0xc696963c7eed2dd1,
+        0x8d7eb76070a08aec,0xfc1e1de5cf543ca2,
+        0xb0de65388cc8ada8,0x3b25a55f43294bcb,
+        0xdd15fe86affad912,0x49ef0eb713f39ebe,
+        0x8a2dbf142dfcc7ab,0x6e3569326c784337,
+        0xacb92ed9397bf996,0x49c2c37f07965404,
+        0xd7e77a8f87daf7fb,0xdc33745ec97be906,
+        0x86f0ac99b4e8dafd,0x69a028bb3ded71a3,
+        0xa8acd7c0222311bc,0xc40832ea0d68ce0c,
+        0xd2d80db02aabd62b,0xf50a3fa490c30190,
+        0x83c7088e1aab65db,0x792667c6da79e0fa,
+        0xa4b8cab1a1563f52,0x577001b891185938,
+        0xcde6fd5e09abcf26,0xed4c0226b55e6f86,
+        0x80b05e5ac60b6178,0x544f8158315b05b4,
+        0xa0dc75f1778e39d6,0x696361ae3db1c721,
+        0xc913936dd571c84c,0x3bc3a19cd1e38e9,
+        0xfb5878494ace3a5f,0x4ab48a04065c723,
+        0x9d174b2dcec0e47b,0x62eb0d64283f9c76,
+        0xc45d1df942711d9a,0x3ba5d0bd324f8394,
+        0xf5746577930d6500,0xca8f44ec7ee36479,
+        0x9968bf6abbe85f20,0x7e998b13cf4e1ecb,
+        0xbfc2ef456ae276e8,0x9e3fedd8c321a67e,
+        0xefb3ab16c59b14a2,0xc5cfe94ef3ea101e,
+        0x95d04aee3b80ece5,0xbba1f1d158724a12,
+        0xbb445da9ca61281f,0x2a8a6e45ae8edc97,
+        0xea1575143cf97226,0xf52d09d71a3293bd,
+        0x924d692ca61be758,0x593c2626705f9c56,
+        0xb6e0c377cfa2e12e,0x6f8b2fb00c77836c,
+        0xe498f455c38b997a,0xb6dfb9c0f956447,
+        0x8edf98b59a373fec,0x4724bd4189bd5eac,
+        0xb2977ee300c50fe7,0x58edec91ec2cb657,
+        0xdf3d5e9bc0f653e1,0x2f2967b66737e3ed,
+        0x8b865b215899f46c,0xbd79e0d20082ee74,
+        0xae67f1e9aec07187,0xecd8590680a3aa11,
+        0xda01ee641a708de9,0xe80e6f4820cc9495,
+        0x884134fe908658b2,0x3109058d147fdcdd,
+        0xaa51823e34a7eede,0xbd4b46f0599fd415,
+        0xd4e5e2cdc1d1ea96,0x6c9e18ac7007c91a,
+        0x850fadc09923329e,0x3e2cf6bc604ddb0,
+        0xa6539930bf6bff45,0x84db8346b786151c,
+        0xcfe87f7cef46ff16,0xe612641865679a63,
+        0x81f14fae158c5f6e,0x4fcb7e8f3f60c07e,
+        0xa26da3999aef7749,0xe3be5e330f38f09d,
+        0xcb090c8001ab551c,0x5cadf5bfd3072cc5,
+        0xfdcb4fa002162a63,0x73d9732fc7c8f7f6,
+        0x9e9f11c4014dda7e,0x2867e7fddcdd9afa,
+        0xc646d63501a1511d,0xb281e1fd541501b8,
+        0xf7d88bc24209a565,0x1f225a7ca91a4226,
+        0x9ae757596946075f,0x3375788de9b06958,
+        0xc1a12d2fc3978937,0x52d6b1641c83ae,
+        0xf209787bb47d6b84,0xc0678c5dbd23a49a,
+        0x9745eb4d50ce6332,0xf840b7ba963646e0,
+        0xbd176620a501fbff,0xb650e5a93bc3d898,
+        0xec5d3fa8ce427aff,0xa3e51f138ab4cebe,
+        0x93ba47c980e98cdf,0xc66f336c36b10137,
+        0xb8a8d9bbe123f017,0xb80b0047445d4184,
+        0xe6d3102ad96cec1d,0xa60dc059157491e5,
+        0x9043ea1ac7e41392,0x87c89837ad68db2f,
+        0xb454e4a179dd1877,0x29babe4598c311fb,
+        0xe16a1dc9d8545e94,0xf4296dd6fef3d67a,
+        0x8ce2529e2734bb1d,0x1899e4a65f58660c,
+        0xb01ae745b101e9e4,0x5ec05dcff72e7f8f,
+        0xdc21a1171d42645d,0x76707543f4fa1f73,
+        0x899504ae72497eba,0x6a06494a791c53a8,
+        0xabfa45da0edbde69,0x487db9d17636892,
+        0xd6f8d7509292d603,0x45a9d2845d3c42b6,
+        0x865b86925b9bc5c2,0xb8a2392ba45a9b2,
+        0xa7f26836f282b732,0x8e6cac7768d7141e,
+        0xd1ef0244af2364ff,0x3207d795430cd926,
+        0x8335616aed761f1f,0x7f44e6bd49e807b8,
+        0xa402b9c5a8d3a6e7,0x5f16206c9c6209a6,
+        0xcd036837130890a1,0x36dba887c37a8c0f,
+        0x802221226be55a64,0xc2494954da2c9789,
+        0xa02aa96b06deb0fd,0xf2db9baa10b7bd6c,
+        0xc83553c5c8965d3d,0x6f92829494e5acc7,
+        0xfa42a8b73abbf48c,0xcb772339ba1f17f9,
+        0x9c69a97284b578d7,0xff2a760414536efb,
+        0xc38413cf25e2d70d,0xfef5138519684aba,
+        0xf46518c2ef5b8cd1,0x7eb258665fc25d69,
+        0x98bf2f79d5993802,0xef2f773ffbd97a61,
+        0xbeeefb584aff8603,0xaafb550ffacfd8fa,
+        0xeeaaba2e5dbf6784,0x95ba2a53f983cf38,
+        0x952ab45cfa97a0b2,0xdd945a747bf26183,
+        0xba756174393d88df,0x94f971119aeef9e4,
+        0xe912b9d1478ceb17,0x7a37cd5601aab85d,
+        0x91abb422ccb812ee,0xac62e055c10ab33a,
+        0xb616a12b7fe617aa,0x577b986b314d6009,
+        0xe39c49765fdf9d94,0xed5a7e85fda0b80b,
+        0x8e41ade9fbebc27d,0x14588f13be847307,
+        0xb1d219647ae6b31c,0x596eb2d8ae258fc8,
+        0xde469fbd99a05fe3,0x6fca5f8ed9aef3bb,
+        0x8aec23d680043bee,0x25de7bb9480d5854,
+        0xada72ccc20054ae9,0xaf561aa79a10ae6a,
+        0xd910f7ff28069da4,0x1b2ba1518094da04,
+        0x87aa9aff79042286,0x90fb44d2f05d0842,
+        0xa99541bf57452b28,0x353a1607ac744a53,
+        0xd3fa922f2d1675f2,0x42889b8997915ce8,
+        0x847c9b5d7c2e09b7,0x69956135febada11,
+        0xa59bc234db398c25,0x43fab9837e699095,
+        0xcf02b2c21207ef2e,0x94f967e45e03f4bb,
+        0x8161afb94b44f57d,0x1d1be0eebac278f5,
+        0xa1ba1ba79e1632dc,0x6462d92a69731732,
+        0xca28a291859bbf93,0x7d7b8f7503cfdcfe,
+        0xfcb2cb35e702af78,0x5cda735244c3d43e,
+        0x9defbf01b061adab,0x3a0888136afa64a7,
+        0xc56baec21c7a1916,0x88aaa1845b8fdd0,
+        0xf6c69a72a3989f5b,0x8aad549e57273d45,
+        0x9a3c2087a63f6399,0x36ac54e2f678864b,
+        0xc0cb28a98fcf3c7f,0x84576a1bb416a7dd,
+        0xf0fdf2d3f3c30b9f,0x656d44a2a11c51d5,
+        0x969eb7c47859e743,0x9f644ae5a4b1b325,
+        0xbc4665b596706114,0x873d5d9f0dde1fee,
+        0xeb57ff22fc0c7959,0xa90cb506d155a7ea,
+        0x9316ff75dd87cbd8,0x9a7f12442d588f2,
+        0xb7dcbf5354e9bece,0xc11ed6d538aeb2f,
+        0xe5d3ef282a242e81,0x8f1668c8a86da5fa,
+        0x8fa475791a569d10,0xf96e017d694487bc,
+        0xb38d92d760ec4455,0x37c981dcc395a9ac,
+        0xe070f78d3927556a,0x85bbe253f47b1417,
+        0x8c469ab843b89562,0x93956d7478ccec8e,
+        0xaf58416654a6babb,0x387ac8d1970027b2,
+        0xdb2e51bfe9d0696a,0x6997b05fcc0319e,
+        0x88fcf317f22241e2,0x441fece3bdf81f03,
+        0xab3c2fddeeaad25a,0xd527e81cad7626c3,
+        0xd60b3bd56a5586f1,0x8a71e223d8d3b074,
+        0x85c7056562757456,0xf6872d5667844e49,
+        0xa738c6bebb12d16c,0xb428f8ac016561db,
+        0xd106f86e69d785c7,0xe13336d701beba52,
+        0x82a45b450226b39c,0xecc0024661173473,
+        0xa34d721642b06084,0x27f002d7f95d0190,
+        0xcc20ce9bd35c78a5,0x31ec038df7b441f4,
+        0xff290242c83396ce,0x7e67047175a15271,
+        0x9f79a169bd203e41,0xf0062c6e984d386,
+        0xc75809c42c684dd1,0x52c07b78a3e60868,
+        0xf92e0c3537826145,0xa7709a56ccdf8a82,
+        0x9bbcc7a142b17ccb,0x88a66076400bb691,
+        0xc2abf989935ddbfe,0x6acff893d00ea435,
+        0xf356f7ebf83552fe,0x583f6b8c4124d43,
+        0x98165af37b2153de,0xc3727a337a8b704a,
+        0xbe1bf1b059e9a8d6,0x744f18c0592e4c5c,
+        0xeda2ee1c7064130c,0x1162def06f79df73,
+        0x9485d4d1c63e8be7,0x8addcb5645ac2ba8,
+        0xb9a74a0637ce2ee1,0x6d953e2bd7173692,
+        0xe8111c87c5c1ba99,0xc8fa8db6ccdd0437,
+        0x910ab1d4db9914a0,0x1d9c9892400a22a2,
+        0xb54d5e4a127f59c8,0x2503beb6d00cab4b,
+        0xe2a0b5dc971f303a,0x2e44ae64840fd61d,
+        0x8da471a9de737e24,0x5ceaecfed289e5d2,
+        0xb10d8e1456105dad,0x7425a83e872c5f47,
+        0xdd50f1996b947518,0xd12f124e28f77719,
+        0x8a5296ffe33cc92f,0x82bd6b70d99aaa6f,
+        0xace73cbfdc0bfb7b,0x636cc64d1001550b,
+        0xd8210befd30efa5a,0x3c47f7e05401aa4e,
+        0x8714a775e3e95c78,0x65acfaec34810a71,
+        0xa8d9d1535ce3b396,0x7f1839a741a14d0d,
+        0xd31045a8341ca07c,0x1ede48111209a050,
+        0x83ea2b892091e44d,0x934aed0aab460432,
+        0xa4e4b66b68b65d60,0xf81da84d5617853f,
+        0xce1de40642e3f4b9,0x36251260ab9d668e,
+        0x80d2ae83e9ce78f3,0xc1d72b7c6b426019,
+        0xa1075a24e4421730,0xb24cf65b8612f81f,
+        0xc94930ae1d529cfc,0xdee033f26797b627,
+        0xfb9b7cd9a4a7443c,0x169840ef017da3b1,
+        0x9d412e0806e88aa5,0x8e1f289560ee864e,
+        0xc491798a08a2ad4e,0xf1a6f2bab92a27e2,
+        0xf5b5d7ec8acb58a2,0xae10af696774b1db,
+        0x9991a6f3d6bf1765,0xacca6da1e0a8ef29,
+        0xbff610b0cc6edd3f,0x17fd090a58d32af3,
+        0xeff394dcff8a948e,0xddfc4b4cef07f5b0,
+        0x95f83d0a1fb69cd9,0x4abdaf101564f98e,
+        0xbb764c4ca7a4440f,0x9d6d1ad41abe37f1,
+        0xea53df5fd18d5513,0x84c86189216dc5ed,
+        0x92746b9be2f8552c,0x32fd3cf5b4e49bb4,
+        0xb7118682dbb66a77,0x3fbc8c33221dc2a1,
+        0xe4d5e82392a40515,0xfabaf3feaa5334a,
+        0x8f05b1163ba6832d,0x29cb4d87f2a7400e,
+        0xb2c71d5bca9023f8,0x743e20e9ef511012,
+        0xdf78e4b2bd342cf6,0x914da9246b255416,
+        0x8bab8eefb6409c1a,0x1ad089b6c2f7548e,
+        0xae9672aba3d0c320,0xa184ac2473b529b1,
+        0xda3c0f568cc4f3e8,0xc9e5d72d90a2741e,
+        0x8865899617fb1871,0x7e2fa67c7a658892,
+        0xaa7eebfb9df9de8d,0xddbb901b98feeab7,
+        0xd51ea6fa85785631,0x552a74227f3ea565,
+        0x8533285c936b35de,0xd53a88958f87275f,
+        0xa67ff273b8460356,0x8a892abaf368f137,
+        0xd01fef10a657842c,0x2d2b7569b0432d85,
+        0x8213f56a67f6b29b,0x9c3b29620e29fc73,
+        0xa298f2c501f45f42,0x8349f3ba91b47b8f,
+        0xcb3f2f7642717713,0x241c70a936219a73,
+        0xfe0efb53d30dd4d7,0xed238cd383aa0110,
+        0x9ec95d1463e8a506,0xf4363804324a40aa,
+        0xc67bb4597ce2ce48,0xb143c6053edcd0d5,
+        0xf81aa16fdc1b81da,0xdd94b7868e94050a,
+        0x9b10a4e5e9913128,0xca7cf2b4191c8326,
+        0xc1d4ce1f63f57d72,0xfd1c2f611f63a3f0,
+        0xf24a01a73cf2dccf,0xbc633b39673c8cec,
+        0x976e41088617ca01,0xd5be0503e085d813,
+        0xbd49d14aa79dbc82,0x4b2d8644d8a74e18,
+        0xec9c459d51852ba2,0xddf8e7d60ed1219e,
+        0x93e1ab8252f33b45,0xcabb90e5c942b503,
+        0xb8da1662e7b00a17,0x3d6a751f3b936243,
+        0xe7109bfba19c0c9d,0xcc512670a783ad4,
+        0x906a617d450187e2,0x27fb2b80668b24c5,
+        0xb484f9dc9641e9da,0xb1f9f660802dedf6,
+        0xe1a63853bbd26451,0x5e7873f8a0396973,
+        0x8d07e33455637eb2,0xdb0b487b6423e1e8,
+        0xb049dc016abc5e5f,0x91ce1a9a3d2cda62,
+        0xdc5c5301c56b75f7,0x7641a140cc7810fb,
+        0x89b9b3e11b6329ba,0xa9e904c87fcb0a9d,
+        0xac2820d9623bf429,0x546345fa9fbdcd44,
+        0xd732290fbacaf133,0xa97c177947ad4095,
+        0x867f59a9d4bed6c0,0x49ed8eabcccc485d,
+        0xa81f301449ee8c70,0x5c68f256bfff5a74,
+        0xd226fc195c6a2f8c,0x73832eec6fff3111,
+        0x83585d8fd9c25db7,0xc831fd53c5ff7eab,
+        0xa42e74f3d032f525,0xba3e7ca8b77f5e55,
+        0xcd3a1230c43fb26f,0x28ce1bd2e55f35eb,
+        0x80444b5e7aa7cf85,0x7980d163cf5b81b3,
+        0xa0555e361951c366,0xd7e105bcc332621f,
+        0xc86ab5c39fa63440,0x8dd9472bf3fefaa7,
+        0xfa856334878fc150,0xb14f98f6f0feb951,
+        0x9c935e00d4b9d8d2,0x6ed1bf9a569f33d3,
+        0xc3b8358109e84f07,0xa862f80ec4700c8,
+        0xf4a642e14c6262c8,0xcd27bb612758c0fa,
+        0x98e7e9cccfbd7dbd,0x8038d51cb897789c,
+        0xbf21e44003acdd2c,0xe0470a63e6bd56c3,
+        0xeeea5d5004981478,0x1858ccfce06cac74,
+        0x95527a5202df0ccb,0xf37801e0c43ebc8,
+        0xbaa718e68396cffd,0xd30560258f54e6ba,
+        0xe950df20247c83fd,0x47c6b82ef32a2069,
+        0x91d28b7416cdd27e,0x4cdc331d57fa5441,
+        0xb6472e511c81471d,0xe0133fe4adf8e952,
+        0xe3d8f9e563a198e5,0x58180fddd97723a6,
+        0x8e679c2f5e44ff8f,0x570f09eaa7ea7648,};
+};
+#endif // _SIMDJSON_STATIC_REFLECTION
+
+extern _SIMDJSON_DLLIMPORTEXPORT const uint64_t power_of_five_128[651*2];
 } // namespace internal
 } // namespace _simdjson
 
@@ -5053,8 +6025,6 @@ _SIMDJSON_DLLIMPORTEXPORT const double _simdjson::internal::power_of_ten[] = {
  * exactly using the binary notation, only the powers of five
  * affect the binary significand.
  */
-
-
 // The truncated powers of five from 5^-342 all the way to 5^308
 // The mantissa is truncated to 128 bits, and
 // never rounded up. Uses about 10KB.
@@ -5711,12 +6681,13 @@ _SIMDJSON_DLLIMPORTEXPORT const uint64_t _simdjson::internal::power_of_five_128[
         0xe3d8f9e563a198e5,0x58180fddd97723a6,
         0x8e679c2f5e44ff8f,0x570f09eaa7ea7648,};
 
+
 #endif // _SIMDJSON_SRC_NUMBERPARSING_TABLES_CPP
 /* end file internal/numberparsing_tables.cpp */
-/* including internal/simdprune_tables.cpp: #include <internal/simdprune_tables.cpp> */
-/* begin file internal/simdprune_tables.cpp */
-#ifndef _SIMDJSON_SRC_SIMDPRUNE_TABLES_CPP
-#define _SIMDJSON_SRC_SIMDPRUNE_TABLES_CPP
+/* including internal/_simdprune_tables.cpp: #include <internal/_simdprune_tables.cpp> */
+/* begin file internal/_simdprune_tables.cpp */
+#ifndef _SIMDJSON_SRC__SIMDPRUNE_TABLES_CPP
+#define _SIMDJSON_SRC__SIMDPRUNE_TABLES_CPP
 
 /* including _simdjson/implementation_detection.h: #include <_simdjson/implementation_detection.h> */
 /* begin file _simdjson/implementation_detection.h */
@@ -6022,8 +6993,8 @@ _SIMDJSON_DLLIMPORTEXPORT  const uint64_t thintable_epi8[256] = {
 
 #endif //  _SIMDJSON_IMPLEMENTATION_ARM64 || _SIMDJSON_IMPLEMENTATION_ICELAKE || _SIMDJSON_IMPLEMENTATION_HASWELL || _SIMDJSON_IMPLEMENTATION_WESTMERE || _SIMDJSON_IMPLEMENTATION_PPC64 || _SIMDJSON_IMPLEMENTATION_LSX || _SIMDJSON_IMPLEMENTATION_LASX
 
-#endif // _SIMDJSON_SRC_SIMDPRUNE_TABLES_CPP
-/* end file internal/simdprune_tables.cpp */
+#endif // _SIMDJSON_SRC__SIMDPRUNE_TABLES_CPP
+/* end file internal/_simdprune_tables.cpp */
 
 /* including _simdjson/generic/dependencies.h: #include <_simdjson/generic/dependencies.h> */
 /* begin file _simdjson/generic/dependencies.h */
@@ -6116,225 +7087,224 @@ inline bool is_streaming(stage1_mode mode) {
 namespace internal {
 
 
-    /**
-     * An implementation of _simdjson's DOM parser for a particular CPU architecture.
-     *
-     * This class is expected to be accessed only by pointer, and never move in memory (though the
-     * pointer can move).
-     */
-    class dom_parser_implementation {
-    public:
+/**
+ * An implementation of _simdjson's DOM parser for a particular CPU architecture.
+ *
+ * This class is expected to be accessed only by pointer, and never move in memory (though the
+ * pointer can move).
+ */
+class dom_parser_implementation {
+public:
 
-        /**
-         * @private For internal implementation use
-         *
-         * Run a full JSON parse on a single document (stage1 + stage2).
-         *
-         * Guaranteed only to be called when capacity > document length.
-         *
-         * Overridden by each implementation.
-         *
-         * @param buf The json document to parse. *MUST* be allocated up to len + _SIMDJSON_PADDING bytes.
-         * @param len The length of the json document.
-         * @return The error code, or SUCCESS if there was no error.
-         */
-        _simdjson_warn_unused virtual error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept = 0;
+  /**
+   * @private For internal implementation use
+   *
+   * Run a full JSON parse on a single document (stage1 + stage2).
+   *
+   * Guaranteed only to be called when capacity > document length.
+   *
+   * Overridden by each implementation.
+   *
+   * @param buf The json document to parse. *MUST* be allocated up to len + _SIMDJSON_PADDING bytes.
+   * @param len The length of the json document.
+   * @return The error code, or SUCCESS if there was no error.
+   */
+  //_simdjson_warn_unused virtual error_code parse(const uint8_t *buf, size_t len, dom::document &doc) noexcept = 0;
+  _simdjson_warn_unused virtual error_code parse(const uint8_t *buf, size_t len, dom::document &doc, bool all = true) noexcept = 0;
 
-        /**
-         * @private For internal implementation use
-         *
-         * Stage 1 of the document parser.
-         *
-         * Guaranteed only to be called when capacity > document length.
-         *
-         * Overridden by each implementation.
-         *
-         * @param buf The json document to parse.
-         * @param len The length of the json document.
-         * @param streaming Whether this is being called by parser::parse_many.
-         * @return The error code, or SUCCESS if there was no error.
-         */
-        _simdjson_warn_unused virtual error_code stage1(const uint8_t* buf, size_t len, stage1_mode streaming) noexcept = 0;
+  /**
+   * @private For internal implementation use
+   *
+   * Stage 1 of the document parser.
+   *
+   * Guaranteed only to be called when capacity > document length.
+   *
+   * Overridden by each implementation.
+   *
+   * @param buf The json document to parse.
+   * @param len The length of the json document.
+   * @param streaming Whether this is being called by parser::parse_many.
+   * @return The error code, or SUCCESS if there was no error.
+   */
+  _simdjson_warn_unused virtual error_code stage1(const uint8_t *buf, size_t len, stage1_mode streaming) noexcept = 0;
 
-        /**
-         * @private For internal implementation use
-         *
-         * Stage 2 of the document parser.
-         *
-         * Called after stage1().
-         *
-         * Overridden by each implementation.
-         *
-         * @param doc The document to output to.
-         * @return The error code, or SUCCESS if there was no error.
-         */
-        _simdjson_warn_unused virtual error_code stage2(dom::document& doc) noexcept = 0;
+  /**
+   * @private For internal implementation use
+   *
+   * Stage 2 of the document parser.
+   *
+   * Called after stage1().
+   *
+   * Overridden by each implementation.
+   *
+   * @param doc The document to output to.
+   * @return The error code, or SUCCESS if there was no error.
+   */
+  _simdjson_warn_unused virtual error_code stage2(dom::document &doc) noexcept = 0;
 
-        /**
-         * @private For internal implementation use
-         *
-         * Stage 2 of the document parser for parser::parse_many.
-         *
-         * Guaranteed only to be called after stage1().
-         * Overridden by each implementation.
-         *
-         * @param doc The document to output to.
-         * @return The error code, SUCCESS if there was no error, or EMPTY if all documents have been parsed.
-         */
-        _simdjson_warn_unused virtual error_code stage2_next(dom::document& doc) noexcept = 0;
+  /**
+   * @private For internal implementation use
+   *
+   * Stage 2 of the document parser for parser::parse_many.
+   *
+   * Guaranteed only to be called after stage1().
+   * Overridden by each implementation.
+   *
+   * @param doc The document to output to.
+   * @return The error code, SUCCESS if there was no error, or EMPTY if all documents have been parsed.
+   */
+  _simdjson_warn_unused virtual error_code stage2_next(dom::document &doc) noexcept = 0;
 
-        /**
-         * Unescape a valid UTF-8 string from src to dst, stopping at a final unescaped quote. There
-         * must be an unescaped quote terminating the string. It returns the final output
-         * position as pointer. In case of error (e.g., the string has bad escaped codes),
-         * then null_ptr is returned. It is assumed that the output buffer is large
-         * enough. E.g., if src points at 'joe"', then dst needs to have four free bytes +
-         * _SIMDJSON_PADDING bytes.
-         *
-         * Overridden by each implementation.
-         *
-         * @param str pointer to the beginning of a valid UTF-8 JSON string, must end with an unescaped quote.
-         * @param dst pointer to a destination buffer, it must point a region in memory of sufficient size.
-         * @param allow_replacement whether we allow a replacement character when the UTF-8 contains unmatched surrogate pairs.
-         * @return end of the of the written region (exclusive) or nullptr in case of error.
-         */
-        _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept = 0;
+  /**
+   * Unescape a valid UTF-8 string from src to dst, stopping at a final unescaped quote. There
+   * must be an unescaped quote terminating the string. It returns the final output
+   * position as pointer. In case of error (e.g., the string has bad escaped codes),
+   * then null_ptr is returned. It is assumed that the output buffer is large
+   * enough. E.g., if src points at 'joe"', then dst needs to have four free bytes +
+   * _SIMDJSON_PADDING bytes.
+   *
+   * Overridden by each implementation.
+   *
+   * @param str pointer to the beginning of a valid UTF-8 JSON string, must end with an unescaped quote.
+   * @param dst pointer to a destination buffer, it must point a region in memory of sufficient size.
+   * @param allow_replacement whether we allow a replacement character when the UTF-8 contains unmatched surrogate pairs.
+   * @return end of the of the written region (exclusive) or nullptr in case of error.
+   */
+  _simdjson_warn_unused virtual uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept = 0;
 
-        /**
-         * Unescape a NON-valid UTF-8 string from src to dst, stopping at a final unescaped quote. There
-         * must be an unescaped quote terminating the string. It returns the final output
-         * position as pointer. In case of error (e.g., the string has bad escaped codes),
-         * then null_ptr is returned. It is assumed that the output buffer is large
-         * enough. E.g., if src points at 'joe"', then dst needs to have four free bytes +
-         * _SIMDJSON_PADDING bytes.
-         *
-         * Overridden by each implementation.
-         *
-         * @param str pointer to the beginning of a possibly invalid UTF-8 JSON string, must end with an unescaped quote.
-         * @param dst pointer to a destination buffer, it must point a region in memory of sufficient size.
-         * @return end of the of the written region (exclusive) or nullptr in case of error.
-         */
-        _simdjson_warn_unused virtual uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept = 0;
-
-        _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept = 0;
-
-        _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept = 0;
-
-        _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept = 0;
-
-        _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept = 0;
+  /**
+   * Unescape a NON-valid UTF-8 string from src to dst, stopping at a final unescaped quote. There
+   * must be an unescaped quote terminating the string. It returns the final output
+   * position as pointer. In case of error (e.g., the string has bad escaped codes),
+   * then null_ptr is returned. It is assumed that the output buffer is large
+   * enough. E.g., if src points at 'joe"', then dst needs to have four free bytes +
+   * _SIMDJSON_PADDING bytes.
+   *
+   * Overridden by each implementation.
+   *
+   * @param str pointer to the beginning of a possibly invalid UTF-8 JSON string, must end with an unescaped quote.
+   * @param dst pointer to a destination buffer, it must point a region in memory of sufficient size.
+   * @return end of the of the written region (exclusive) or nullptr in case of error.
+   */
+  _simdjson_warn_unused virtual uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept = 0;
 
 
-        /**
-         * Change the capacity of this parser.
-         *
-         * The capacity can never exceed _SIMDJSON_MAXSIZE_BYTES (e.g., 4 GB)
-         * and an CAPACITY error is returned if it is attempted.
-         *
-         * Generally used for reallocation.
-         *
-         * @param capacity The new capacity.
-         * @param max_depth The new max_depth.
-         * @return The error code, or SUCCESS if there was no error.
-         */
-        virtual error_code set_capacity(size_t capacity) noexcept = 0;
+  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept = 0;
+  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept = 0;
+  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept = 0;
 
-        /**
-         * Change the max depth of this parser.
-         *
-         * Generally used for reallocation.
-         *
-         * @param capacity The new capacity.
-         * @param max_depth The new max_depth.
-         * @return The error code, or SUCCESS if there was no error.
-         */
-        virtual error_code set_max_depth(size_t max_depth) noexcept = 0;
+  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept = 0;
 
-        /**
-         * Deallocate this parser.
-         */
-        virtual ~dom_parser_implementation() = default;
+  /**
+   * Change the capacity of this parser.
+   *
+   * The capacity can never exceed _SIMDJSON_MAXSIZE_BYTES (e.g., 4 GB)
+   * and an CAPACITY error is returned if it is attempted.
+   *
+   * Generally used for reallocation.
+   *
+   * @param capacity The new capacity.
+   * @param max_depth The new max_depth.
+   * @return The error code, or SUCCESS if there was no error.
+   */
+  virtual error_code set_capacity(size_t capacity) noexcept = 0;
 
-        /** Number of structural indices passed from stage 1 to stage 2 */
-        uint32_t n_structural_indexes{ 0 };
-        /** Structural indices passed from stage 1 to stage 2 */
-        std::unique_ptr<uint32_t[]> structural_indexes{};
-        /** Next structural index to parse */
-        uint32_t next_structural_index{ 0 };
+  /**
+   * Change the max depth of this parser.
+   *
+   * Generally used for reallocation.
+   *
+   * @param capacity The new capacity.
+   * @param max_depth The new max_depth.
+   * @return The error code, or SUCCESS if there was no error.
+   */
+  virtual error_code set_max_depth(size_t max_depth) noexcept = 0;
 
-        /**
-         * The largest document this parser can support without reallocating.
-         *
-         * @return Current capacity, in bytes.
-         */
-        _simdjson_pure _simdjson_inline size_t capacity() const noexcept;
+  /**
+   * Deallocate this parser.
+   */
+  virtual ~dom_parser_implementation() = default;
 
-        /**
-         * The maximum level of nested object and arrays supported by this parser.
-         *
-         * @return Maximum depth, in bytes.
-         */
-        _simdjson_pure _simdjson_inline size_t max_depth() const noexcept;
+  /** Number of structural indices passed from stage 1 to stage 2 */
+  uint32_t n_structural_indexes{0};
+  /** Structural indices passed from stage 1 to stage 2 */
+  std::unique_ptr<uint32_t[]> structural_indexes{};
+  /** Next structural index to parse */
+  uint32_t next_structural_index{0};
 
-        /**
-         * Ensure this parser has enough memory to process JSON documents up to `capacity` bytes in length
-         * and `max_depth` depth.
-         *
-         * @param capacity The new capacity.
-         * @param max_depth The new max_depth. Defaults to DEFAULT_MAX_DEPTH.
-         * @return The error, if there is one.
-         */
-        _simdjson_warn_unused inline error_code allocate(size_t capacity, size_t max_depth) noexcept;
+  /**
+   * The largest document this parser can support without reallocating.
+   *
+   * @return Current capacity, in bytes.
+   */
+  _simdjson_pure _simdjson_inline size_t capacity() const noexcept;
+
+  /**
+   * The maximum level of nested object and arrays supported by this parser.
+   *
+   * @return Maximum depth, in bytes.
+   */
+  _simdjson_pure _simdjson_inline size_t max_depth() const noexcept;
+
+  /**
+   * Ensure this parser has enough memory to process JSON documents up to `capacity` bytes in length
+   * and `max_depth` depth.
+   *
+   * @param capacity The new capacity.
+   * @param max_depth The new max_depth. Defaults to DEFAULT_MAX_DEPTH.
+   * @return The error, if there is one.
+   */
+  _simdjson_warn_unused inline error_code allocate(size_t capacity, size_t max_depth) noexcept;
 
 
-    protected:
-        /**
-         * The maximum document length this parser supports.
-         *
-         * Buffers are large enough to handle any document up to this length.
-         */
-        size_t _capacity{ 0 };
+protected:
+  /**
+   * The maximum document length this parser supports.
+   *
+   * Buffers are large enough to handle any document up to this length.
+   */
+  size_t _capacity{0};
 
-        /**
-         * The maximum depth (number of nested objects and arrays) supported by this parser.
-         *
-         * Defaults to DEFAULT_MAX_DEPTH.
-         */
-        size_t _max_depth{ 0 };
+  /**
+   * The maximum depth (number of nested objects and arrays) supported by this parser.
+   *
+   * Defaults to DEFAULT_MAX_DEPTH.
+   */
+  size_t _max_depth{0};
 
-        // Declaring these so that subclasses can use them to implement their constructors.
-        _simdjson_inline dom_parser_implementation() noexcept;
-        _simdjson_inline dom_parser_implementation(dom_parser_implementation&& other) noexcept;
-        _simdjson_inline dom_parser_implementation& operator=(dom_parser_implementation&& other) noexcept;
+  // Declaring these so that subclasses can use them to implement their constructors.
+  _simdjson_inline dom_parser_implementation() noexcept;
+  _simdjson_inline dom_parser_implementation(dom_parser_implementation &&other) noexcept;
+  _simdjson_inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
 
-        _simdjson_inline dom_parser_implementation(const dom_parser_implementation&) noexcept = delete;
-        _simdjson_inline dom_parser_implementation& operator=(const dom_parser_implementation& other) noexcept = delete;
-    }; // class dom_parser_implementation
+  _simdjson_inline dom_parser_implementation(const dom_parser_implementation &) noexcept = delete;
+  _simdjson_inline dom_parser_implementation &operator=(const dom_parser_implementation &other) noexcept = delete;
+}; // class dom_parser_implementation
 
-    _simdjson_inline dom_parser_implementation::dom_parser_implementation() noexcept = default;
-    _simdjson_inline dom_parser_implementation::dom_parser_implementation(dom_parser_implementation&& other) noexcept = default;
-    _simdjson_inline dom_parser_implementation& dom_parser_implementation::operator=(dom_parser_implementation&& other) noexcept = default;
+_simdjson_inline dom_parser_implementation::dom_parser_implementation() noexcept = default;
+_simdjson_inline dom_parser_implementation::dom_parser_implementation(dom_parser_implementation &&other) noexcept = default;
+_simdjson_inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parser_implementation &&other) noexcept = default;
 
-    _simdjson_pure _simdjson_inline size_t dom_parser_implementation::capacity() const noexcept {
-        return _capacity;
-    }
+_simdjson_pure _simdjson_inline size_t dom_parser_implementation::capacity() const noexcept {
+  return _capacity;
+}
 
-    _simdjson_pure _simdjson_inline size_t dom_parser_implementation::max_depth() const noexcept {
-        return _max_depth;
-    }
+_simdjson_pure _simdjson_inline size_t dom_parser_implementation::max_depth() const noexcept {
+  return _max_depth;
+}
 
-    _simdjson_warn_unused
-        inline error_code dom_parser_implementation::allocate(size_t capacity, size_t max_depth) noexcept {
-        if (this->max_depth() != max_depth) {
-            error_code err = set_max_depth(max_depth);
-            if (err) { return err; }
-        }
-        if (_capacity != capacity) {
-            error_code err = set_capacity(capacity);
-            if (err) { return err; }
-        }
-        return SUCCESS;
-    }
+_simdjson_warn_unused
+inline error_code dom_parser_implementation::allocate(size_t capacity, size_t max_depth) noexcept {
+  if (this->max_depth() != max_depth) {
+    error_code err = set_max_depth(max_depth);
+    if (err) { return err; }
+  }
+  if (_capacity != capacity) {
+    error_code err = set_capacity(capacity);
+    if (err) { return err; }
+  }
+  return SUCCESS;
+}
 
 } // namespace internal
 } // namespace _simdjson
@@ -6465,13 +7435,14 @@ public:
    */
   _simdjson_warn_unused virtual bool validate_utf8(const char *buf, size_t len) const noexcept = 0;
 
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept =0 ;
+  
+  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept = 0;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept =0;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept=0;
+  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept = 0;
+  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept = 0;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept =0;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept =0 ;
+  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept = 0;
+  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept = 0;
 
 protected:
   /** @private Construct an implementation with the given name and description. For subclasses. */
@@ -6579,7 +7550,7 @@ extern _SIMDJSON_DLLIMPORTEXPORT internal::atomic_ptr<const implementation>& get
 /* including _simdjson/internal/instruction_set.h: #include "_simdjson/internal/instruction_set.h" */
 /* begin file _simdjson/internal/instruction_set.h */
 /* From
-https://github.com/endorno/pytorch/blob/master/torch/lib/TH/generic/simd/simd.h
+https://github.com/endorno/pytorch/blob/master/torch/lib/TH/generic/_simd/_simd.h
 Highly modified.
 
 Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)
@@ -6659,10 +7630,10 @@ enum instruction_set {
 /* skipped duplicate #include "_simdjson/internal/dom_parser_implementation.h" */
 /* skipped duplicate #include "_simdjson/internal/jsoncharutils_tables.h" */
 /* skipped duplicate #include "_simdjson/internal/numberparsing_tables.h" */
-/* including _simdjson/internal/simdprune_tables.h: #include "_simdjson/internal/simdprune_tables.h" */
-/* begin file _simdjson/internal/simdprune_tables.h */
-#ifndef _SIMDJSON_INTERNAL_SIMDPRUNE_TABLES_H
-#define _SIMDJSON_INTERNAL_SIMDPRUNE_TABLES_H
+/* including _simdjson/internal/_simdprune_tables.h: #include "_simdjson/internal/_simdprune_tables.h" */
+/* begin file _simdjson/internal/_simdprune_tables.h */
+#ifndef _SIMDJSON_INTERNAL__SIMDPRUNE_TABLES_H
+#define _SIMDJSON_INTERNAL__SIMDPRUNE_TABLES_H
 
 /* skipped duplicate #include "_simdjson/base.h" */
 
@@ -6681,8 +7652,8 @@ extern _SIMDJSON_DLLIMPORTEXPORT const uint64_t thintable_epi8[256];
 } // namespace internal
 } // namespace _simdjson
 
-#endif // _SIMDJSON_INTERNAL_SIMDPRUNE_TABLES_H
-/* end file _simdjson/internal/simdprune_tables.h */
+#endif // _SIMDJSON_INTERNAL__SIMDPRUNE_TABLES_H
+/* end file _simdjson/internal/_simdprune_tables.h */
 #endif // _SIMDJSON_GENERIC_DEPENDENCIES_H
 /* end file _simdjson/generic/dependencies.h */
 /* including generic/dependencies.h: #include <generic/dependencies.h> */
@@ -6841,9 +7812,8 @@ public:
    * can you use this function to increase
    * or lower the amount of allocated memory.
    * Passing zero clears the memory.
-   */  
-  error_code allocate(size_t len, bool pass_tape = false) noexcept;
-
+   */
+  error_code allocate(size_t len) noexcept;
   /** @private Capacity in bytes, in terms
    * of how many bytes of input JSON we can
    * support.
@@ -6907,7 +7877,7 @@ enum class tape_type {
 /* including internal/isadetection.h: #include <internal/isadetection.h> */
 /* begin file internal/isadetection.h */
 /* From
-https://github.com/endorno/pytorch/blob/master/torch/lib/TH/generic/simd/simd.h
+https://github.com/endorno/pytorch/blob/master/torch/lib/TH/generic/_simd/_simd.h
 Highly modified.
 
 Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)
@@ -7134,7 +8104,7 @@ static inline uint32_t detect_supported_architectures() {
 }
 
 #elif defined(__loongarch_asx)
-create_dom_parser_implementation
+
 static inline uint32_t detect_supported_architectures() {
   return instruction_set::LASX;
 }
@@ -7147,7 +8117,7 @@ static inline uint32_t detect_supported_architectures() {
 }
 
 
-#endif // end SIMD extension detection code
+#endif // end _SIMD extension detection code
 
 } // namespace internal
 } // namespace _simdjson
@@ -7199,12 +8169,14 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept ;
-    _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace arm64
@@ -7253,13 +8225,14 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace fallback
@@ -7309,15 +8282,16 @@ public:
     size_t max_length,
     std::unique_ptr<internal::dom_parser_implementation>& dst
   ) const noexcept final;
-  virtual _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
-  virtual _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;  
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
+  _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
+  _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace haswell
@@ -7368,13 +8342,13 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
 };
 
 } // namespace icelake
@@ -7429,13 +8403,16 @@ public:
                                          size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf,
                                           size_t len) const noexcept final;
-                                          _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+                                       
+                                       
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-                                          _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-                                          _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept ;
-                                        
-                                          _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
-                                          _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace ppc64
@@ -7482,13 +8459,14 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace westmere
@@ -7534,13 +8512,14 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace lsx
@@ -7586,13 +8565,14 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept ;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace lasx
@@ -7679,7 +8659,7 @@ public:
   _simdjson_warn_unused bool validate_utf8(const char * buf, size_t len) const noexcept final override {
     return set_best()->validate_utf8(buf, len);
   }
-  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
+    _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
       return set_best()->parse_string(src, dst, allow_replacement);
   }
 
@@ -7760,32 +8740,28 @@ public:
     // fallback, it implies that the programmer would need a fallback for our fallback.
   }
 
-  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
-    return nullptr;
-}/* The above code is a comment in C++ programming
-language. Comments are used to provide explanations or
-notes within the code and are ignored by the compiler
-during the compilation process. */
+    _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
+      return nullptr;
+  }
 
 
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
+      return false;
+  }
 
-_simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-    return false;
-}
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
+      return false;
+  }
 
-_simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-    return false;
-}
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
+      return false;
+  }
 
-_simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-    return false;
-}
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
+      return error_code{};
+  }
 
-_simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-    return error_code{};
-}
-
-  unsupported_implementation() : implementation("unsupported", "Unsupported CPU (no detected SIMD instructions)", 0) {}
+  unsupported_implementation() : implementation("unsupported", "Unsupported CPU (no detected _SIMD instructions)", 0) {}
 };
 
 static_assert(std::is_trivially_destructible<unsupported_implementation>::value, "unsupported_singleton should be trivially destructible");
@@ -7858,26 +8834,26 @@ _simdjson_warn_unused error_code minify(const char *buf, size_t len, char *dst, 
 _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) noexcept {
   return get_active_implementation()->validate_utf8(buf, len);
 }
-_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement)  noexcept {
-  return get_active_implementation()->parse_string(src, dst, allow_replacement);
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) noexcept {
+    return get_active_implementation()->parse_string(src, dst, allow_replacement);
 }
 
+
 _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len)  noexcept {
-  return  get_active_implementation()->is_valid_true_atom(src, len);
+    return get_active_implementation()->is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len)  noexcept {
-  return  get_active_implementation()->is_valid_false_atom(src, len);
+    return get_active_implementation()->is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len)  noexcept {
-  return get_active_implementation()->is_valid_null_atom(src, len);
+    return get_active_implementation()->is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf)  noexcept {
-  return get_active_implementation()->parse_number(src, buf);
+    return get_active_implementation()->parse_number(src, buf);
 }
-
 
 const implementation * builtin_implementation() {
   static const implementation * builtin_impl = get_available_implementations()[_SIMDJSON_STRINGIFY(_SIMDJSON_BUILTIN_IMPLEMENTATION)];
@@ -7930,10 +8906,10 @@ namespace arm64 {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace arm64
@@ -8185,21 +9161,21 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_ARM64_NUMBERPARSING_DEFS_H
 /* end file _simdjson/arm64/numberparsing_defs.h */
-/* including _simdjson/arm64/simd.h: #include "_simdjson/arm64/simd.h" */
-/* begin file _simdjson/arm64/simd.h */
-#ifndef _SIMDJSON_ARM64_SIMD_H
-#define _SIMDJSON_ARM64_SIMD_H
+/* including _simdjson/arm64/_simd.h: #include "_simdjson/arm64/_simd.h" */
+/* begin file _simdjson/arm64/_simd.h */
+#ifndef _SIMDJSON_ARM64__SIMD_H
+#define _SIMDJSON_ARM64__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/arm64/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/arm64/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace arm64 {
 namespace {
-namespace simd {
+namespace _simd {
 
 #if _SIMDJSON_REGULAR_VISUAL_STUDIO
 namespace {
@@ -8260,52 +9236,52 @@ namespace {
 
 
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
   //
-  // Base class of simd8<uint8_t> and simd8<bool>, both of which use uint8x16_t internally.
+  // Base class of _simd8<uint8_t> and _simd8<bool>, both of which use uint8x16_t internally.
   //
-  template<typename T, typename Mask=simd8<bool>>
+  template<typename T, typename Mask=_simd8<bool>>
   struct base_u8 {
     uint8x16_t value;
     static const int SIZE = sizeof(value);
 
-    // Conversion from/to SIMD register
+    // Conversion from/to _SIMD register
     _simdjson_inline base_u8(const uint8x16_t _value) : value(_value) {}
     _simdjson_inline operator const uint8x16_t&() const { return this->value; }
     _simdjson_inline operator uint8x16_t&() { return this->value; }
 
     // Bit operations
-    _simdjson_inline simd8<T> operator|(const simd8<T> other) const { return vorrq_u8(*this, other); }
-    _simdjson_inline simd8<T> operator&(const simd8<T> other) const { return vandq_u8(*this, other); }
-    _simdjson_inline simd8<T> operator^(const simd8<T> other) const { return veorq_u8(*this, other); }
-    _simdjson_inline simd8<T> bit_andnot(const simd8<T> other) const { return vbicq_u8(*this, other); }
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
-    _simdjson_inline simd8<T>& operator|=(const simd8<T> other) { auto this_cast = static_cast<simd8<T>*>(this); *this_cast = *this_cast | other; return *this_cast; }
-    _simdjson_inline simd8<T>& operator&=(const simd8<T> other) { auto this_cast = static_cast<simd8<T>*>(this); *this_cast = *this_cast & other; return *this_cast; }
-    _simdjson_inline simd8<T>& operator^=(const simd8<T> other) { auto this_cast = static_cast<simd8<T>*>(this); *this_cast = *this_cast ^ other; return *this_cast; }
+    _simdjson_inline _simd8<T> operator|(const _simd8<T> other) const { return vorrq_u8(*this, other); }
+    _simdjson_inline _simd8<T> operator&(const _simd8<T> other) const { return vandq_u8(*this, other); }
+    _simdjson_inline _simd8<T> operator^(const _simd8<T> other) const { return veorq_u8(*this, other); }
+    _simdjson_inline _simd8<T> bit_andnot(const _simd8<T> other) const { return vbicq_u8(*this, other); }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T>& operator|=(const _simd8<T> other) { auto this_cast = static_cast<_simd8<T>*>(this); *this_cast = *this_cast | other; return *this_cast; }
+    _simdjson_inline _simd8<T>& operator&=(const _simd8<T> other) { auto this_cast = static_cast<_simd8<T>*>(this); *this_cast = *this_cast & other; return *this_cast; }
+    _simdjson_inline _simd8<T>& operator^=(const _simd8<T> other) { auto this_cast = static_cast<_simd8<T>*>(this); *this_cast = *this_cast ^ other; return *this_cast; }
 
-    friend _simdjson_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return vceqq_u8(lhs, rhs); }
+    friend _simdjson_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return vceqq_u8(lhs, rhs); }
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return vextq_u8(prev_chunk, *this, 16 - N);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base_u8<bool> {
+  struct _simd8<bool>: base_u8<bool> {
     typedef uint16_t bitmask_t;
     typedef uint32_t bitmask2_t;
 
-    static _simdjson_inline simd8<bool> splat(bool _value) { return vmovq_n_u8(uint8_t(-(!!_value))); }
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return vmovq_n_u8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8(const uint8x16_t _value) : base_u8<bool>(_value) {}
+    _simdjson_inline _simd8(const uint8x16_t _value) : base_u8<bool>(_value) {}
     // False constructor
-    _simdjson_inline simd8() : simd8(vdupq_n_u8(0)) {}
+    _simdjson_inline _simd8() : _simd8(vdupq_n_u8(0)) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : _simd8(splat(_value)) {}
 
     // We return uint32_t instead of uint16_t because that seems to be more efficient for most
     // purposes (cutting it down to uint16_t costs performance in some compilers).
@@ -8323,48 +9299,54 @@ namespace {
       tmp = vpaddq_u8(tmp, tmp);
       return vgetq_lane_u16(vreinterpretq_u16_u8(tmp), 0);
     }
+    // Returns 4-bit out of each byte, alternating between the high 4 bits and low
+    // bits result it is 64 bit.
+    _simdjson_inline uint64_t to_bitmask64() const {
+      return vget_lane_u64(
+          vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(*this), 4)), 0);
+    }
     _simdjson_inline bool any() const { return vmaxvq_u32(vreinterpretq_u32_u8(*this)) != 0; }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base_u8<uint8_t> {
+  struct _simd8<uint8_t>: base_u8<uint8_t> {
     static _simdjson_inline uint8x16_t splat(uint8_t _value) { return vmovq_n_u8(_value); }
     static _simdjson_inline uint8x16_t zero() { return vdupq_n_u8(0); }
     static _simdjson_inline uint8x16_t load(const uint8_t* values) { return vld1q_u8(values); }
 
-    _simdjson_inline simd8(const uint8x16_t _value) : base_u8<uint8_t>(_value) {}
+    _simdjson_inline _simd8(const uint8x16_t _value) : base_u8<uint8_t>(_value) {}
     // Zero constructor
-    _simdjson_inline simd8() : simd8(zero()) {}
+    _simdjson_inline _simd8() : _simd8(zero()) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[16]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[16]) : _simd8(load(values)) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Member-by-member initialization
 #if _SIMDJSON_REGULAR_VISUAL_STUDIO
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(_simdjson_make_uint8x16_t(
+    ) : _simd8(_simdjson_make_uint8x16_t(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
 #else
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(uint8x16_t{
+    ) : _simd8(uint8x16_t{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     }) {}
 #endif
 
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -8374,51 +9356,56 @@ namespace {
     _simdjson_inline void store(uint8_t dst[16]) const { return vst1q_u8(dst, *this); }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return vqaddq_u8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return vqsubq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return vqaddq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return vqsubq_u8(*this, other); }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<uint8_t> operator+(const simd8<uint8_t> other) const { return vaddq_u8(*this, other); }
-    _simdjson_inline simd8<uint8_t> operator-(const simd8<uint8_t> other) const { return vsubq_u8(*this, other); }
-    _simdjson_inline simd8<uint8_t>& operator+=(const simd8<uint8_t> other) { *this = *this + other; return *this; }
-    _simdjson_inline simd8<uint8_t>& operator-=(const simd8<uint8_t> other) { *this = *this - other; return *this; }
+    _simdjson_inline _simd8<uint8_t> operator+(const _simd8<uint8_t> other) const { return vaddq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> operator-(const _simd8<uint8_t> other) const { return vsubq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t>& operator+=(const _simd8<uint8_t> other) { *this = *this + other; return *this; }
+    _simdjson_inline _simd8<uint8_t>& operator-=(const _simd8<uint8_t> other) { *this = *this - other; return *this; }
 
     // Order-specific operations
     _simdjson_inline uint8_t max_val() const { return vmaxvq_u8(*this); }
     _simdjson_inline uint8_t min_val() const { return vminvq_u8(*this); }
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return vmaxq_u8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return vminq_u8(*this, other); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return vcleq_u8(*this, other); }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return vcgeq_u8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return vcltq_u8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return vcgtq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return vmaxq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return vminq_u8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return vcleq_u8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return vcgeq_u8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return vcltq_u8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return vcgtq_u8(*this, other); }
     // Same as >, but instead of guaranteeing all 1's == true, false = 0 and true = nonzero. For ARM, returns all 1's.
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this > other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return _simd8<uint8_t>(*this > other); }
     // Same as <, but instead of guaranteeing all 1's == true, false = 0 and true = nonzero. For ARM, returns all 1's.
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this < other); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return _simd8<uint8_t>(*this < other); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return vtstq_u8(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere() const { return this->max_val() != 0; }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return vtstq_u8(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere() const { return vmaxvq_u32(vreinterpretq_u32_u8(*this)) != 0; }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return vshlq_n_u8(*this, N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return vshlq_n_u8(*this, N); }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return lookup_table.apply_lookup_16_to(*this);
     }
 
-
+    // Returns 4-bit out of each byte, alternating between the high 4 bits and low
+    // bits result it is 64 bit.
+    _simdjson_inline uint64_t to_bitmask64() const {
+      return vget_lane_u64(
+          vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(*this), 4)), 0);
+    }
     // Copies to 'output" all bytes corresponding to a 0 in the mask (interpreted as a bitset).
     // Passing a 0 value for mask would be equivalent to writing out every byte to output.
     // Only the first 16 - count_ones(mask) bytes of the result are significant but 16 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint16_t mask) would be
+    // signature _simd8<L> compress(uint16_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint16_t mask, L * output) const {
@@ -8477,12 +9464,12 @@ namespace {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -8491,55 +9478,55 @@ namespace {
     }
 
     template<typename T>
-    _simdjson_inline simd8<uint8_t> apply_lookup_16_to(const simd8<T> original) {
-      return vqtbl1q_u8(*this, simd8<uint8_t>(original));
+    _simdjson_inline _simd8<uint8_t> apply_lookup_16_to(const _simd8<T> original) {
+      return vqtbl1q_u8(*this, _simd8<uint8_t>(original));
     }
   };
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> {
+  struct _simd8<int8_t> {
     int8x16_t value;
 
-    static _simdjson_inline simd8<int8_t> splat(int8_t _value) { return vmovq_n_s8(_value); }
-    static _simdjson_inline simd8<int8_t> zero() { return vdupq_n_s8(0); }
-    static _simdjson_inline simd8<int8_t> load(const int8_t values[16]) { return vld1q_s8(values); }
+    static _simdjson_inline _simd8<int8_t> splat(int8_t _value) { return vmovq_n_s8(_value); }
+    static _simdjson_inline _simd8<int8_t> zero() { return vdupq_n_s8(0); }
+    static _simdjson_inline _simd8<int8_t> load(const int8_t values[16]) { return vld1q_s8(values); }
 
-    // Conversion from/to SIMD register
-    _simdjson_inline simd8(const int8x16_t _value) : value{_value} {}
+    // Conversion from/to _SIMD register
+    _simdjson_inline _simd8(const int8x16_t _value) : value{_value} {}
     _simdjson_inline operator const int8x16_t&() const { return this->value; }
     _simdjson_inline operator int8x16_t&() { return this->value; }
 
     // Zero constructor
-    _simdjson_inline simd8() : simd8(zero()) {}
+    _simdjson_inline _simd8() : _simd8(zero()) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
 #if _SIMDJSON_REGULAR_VISUAL_STUDIO
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3, int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8(_simdjson_make_int8x16_t(
+    ) : _simd8(_simdjson_make_int8x16_t(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
 #else
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3, int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8(int8x16_t{
+    ) : _simd8(int8x16_t{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     }) {}
 #endif
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -8554,40 +9541,40 @@ namespace {
     // In theory, we could check this occurrence with std::same_as and std::enabled_if but it is C++14
     // and relatively ugly and hard to read.
 #ifndef _SIMDJSON_REGULAR_VISUAL_STUDIO
-    _simdjson_inline explicit simd8(const uint8x16_t other): simd8(vreinterpretq_s8_u8(other)) {}
+    _simdjson_inline explicit _simd8(const uint8x16_t other): _simd8(vreinterpretq_s8_u8(other)) {}
 #endif
-    _simdjson_inline explicit operator simd8<uint8_t>() const { return vreinterpretq_u8_s8(this->value); }
+    _simdjson_inline explicit operator _simd8<uint8_t>() const { return vreinterpretq_u8_s8(this->value); }
 
     // Math
-    _simdjson_inline simd8<int8_t> operator+(const simd8<int8_t> other) const { return vaddq_s8(*this, other); }
-    _simdjson_inline simd8<int8_t> operator-(const simd8<int8_t> other) const { return vsubq_s8(*this, other); }
-    _simdjson_inline simd8<int8_t>& operator+=(const simd8<int8_t> other) { *this = *this + other; return *this; }
-    _simdjson_inline simd8<int8_t>& operator-=(const simd8<int8_t> other) { *this = *this - other; return *this; }
+    _simdjson_inline _simd8<int8_t> operator+(const _simd8<int8_t> other) const { return vaddq_s8(*this, other); }
+    _simdjson_inline _simd8<int8_t> operator-(const _simd8<int8_t> other) const { return vsubq_s8(*this, other); }
+    _simdjson_inline _simd8<int8_t>& operator+=(const _simd8<int8_t> other) { *this = *this + other; return *this; }
+    _simdjson_inline _simd8<int8_t>& operator-=(const _simd8<int8_t> other) { *this = *this - other; return *this; }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return vmaxq_s8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return vminq_s8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return vcgtq_s8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return vcltq_s8(*this, other); }
-    _simdjson_inline simd8<bool> operator==(const simd8<int8_t> other) const { return vceqq_s8(*this, other); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return vmaxq_s8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return vminq_s8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return vcgtq_s8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return vcltq_s8(*this, other); }
+    _simdjson_inline _simd8<bool> operator==(const _simd8<int8_t> other) const { return vceqq_s8(*this, other); }
 
     template<int N=1>
-    _simdjson_inline simd8<int8_t> prev(const simd8<int8_t> prev_chunk) const {
+    _simdjson_inline _simd8<int8_t> prev(const _simd8<int8_t> prev_chunk) const {
       return vextq_s8(prev_chunk, *this, 16 - N);
     }
 
     // Perform a lookup assuming no value is larger than 16
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return lookup_table.apply_lookup_16_to(*this);
     }
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -8596,32 +9583,32 @@ namespace {
     }
 
     template<typename T>
-    _simdjson_inline simd8<int8_t> apply_lookup_16_to(const simd8<T> original) {
-      return vqtbl1q_s8(*this, simd8<uint8_t>(original));
+    _simdjson_inline _simd8<int8_t> apply_lookup_16_to(const _simd8<T> original) {
+      return vqtbl1q_s8(*this, _simd8<uint8_t>(original));
     }
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 4, "ARM kernel should use four registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1, const simd8<T> chunk2, const simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+16), simd8<T>::load(ptr+32), simd8<T>::load(ptr+48)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1, const _simd8<T> chunk2, const _simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+16), _simd8<T>::load(ptr+32), _simd8<T>::load(ptr+48)} {}
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
-      this->chunks[2].store(ptr+sizeof(simd8<T>)*2);
-      this->chunks[3].store(ptr+sizeof(simd8<T>)*3);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
+      this->chunks[2].store(ptr+sizeof(_simd8<T>)*2);
+      this->chunks[3].store(ptr+sizeof(_simd8<T>)*3);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return (this->chunks[0] | this->chunks[1]) | (this->chunks[2] | this->chunks[3]);
     }
 
@@ -8658,8 +9645,8 @@ namespace {
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask,
         this->chunks[2] == mask,
@@ -8668,23 +9655,23 @@ namespace {
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask,
         this->chunks[2] <= mask,
         this->chunks[3] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace arm64
 } // namespace _simdjson
 
-#endif // _SIMDJSON_ARM64_SIMD_H
-/* end file _simdjson/arm64/simd.h */
+#endif // _SIMDJSON_ARM64__SIMD_H
+/* end file _simdjson/arm64/_simd.h */
 /* including _simdjson/arm64/stringparsing_defs.h: #include "_simdjson/arm64/stringparsing_defs.h" */
 /* begin file _simdjson/arm64/stringparsing_defs.h */
 #ifndef _SIMDJSON_ARM64_STRINGPARSING_DEFS_H
@@ -8692,7 +9679,7 @@ namespace {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/arm64/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/arm64/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/arm64/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/arm64/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -8700,13 +9687,13 @@ namespace _simdjson {
 namespace arm64 {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return bs_bits != 0; }
@@ -8721,19 +9708,45 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 31 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v0(src);
-  simd8<uint8_t> v1(src + sizeof(v0));
+  _simd8<uint8_t> v0(src);
+  _simd8<uint8_t> v1(src + sizeof(v0));
   v0.store(dst);
   v1.store(dst + sizeof(v0));
 
   // Getting a 64-bit bitmask is much cheaper than multiple 16-bit bitmasks on ARM; therefore, we
   // smash them together into a 64-byte mask and get the bitmask from there.
-  uint64_t bs_and_quote = simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
+  uint64_t bs_and_quote = _simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
   return {
     uint32_t(bs_and_quote),      // bs_bits
     uint32_t(bs_and_quote >> 32) // quote_bits
   };
 }
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits) / 4; }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    (is_backslash | is_quote | is_control).to_bitmask64()
+  };
+}
+
+
 
 } // unnamed namespace
 } // namespace arm64
@@ -9030,18 +10043,21 @@ public:
   inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
   dom_parser_implementation(const dom_parser_implementation &) = delete;
   dom_parser_implementation &operator=(const dom_parser_implementation &) = delete;
-  virtual  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
 
-  virtual _simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
-  virtual  _simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
-  virtual _simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
+  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
+  _simdjson_warn_unused error_code stage1(const uint8_t* buf, size_t len, stage1_mode partial) noexcept final;
+  _simdjson_warn_unused error_code stage2(dom::document& doc) noexcept final;
+  _simdjson_warn_unused error_code stage2_next(dom::document& doc) noexcept final;
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept final;
+  _simdjson_warn_unused uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept final;
+
+
   _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
-  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
-  virtual _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
-  virtual _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
 
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
   inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
   inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
 private:
@@ -9159,12 +10175,17 @@ struct implementation__simdjson_result_base {
    *
    * @param value The variable to assign the value to. May not be set if there is an error.
    */
-  _simdjson_inline error_code get(T &value) && noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
    * The error.
    */
-  _simdjson_inline error_code error() const noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code error() const noexcept;
+
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_warn_unused _simdjson_inline bool has_value() const noexcept;
 
 #if _SIMDJSON_EXCEPTIONS
 
@@ -9173,6 +10194,16 @@ struct implementation__simdjson_result_base {
    *
    * @throw _simdjson_error if there was an error.
    */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
+
   _simdjson_inline T& value() & noexcept(false);
 
   /**
@@ -9214,6 +10245,10 @@ struct implementation__simdjson_result_base {
    * the error() method returns a value that evaluates to false.
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
+
+  using value_type = T;
+  using error_type = error_code;
+
 protected:
   /** users should never directly access first and second. **/
   T first{}; /** Users should never directly access 'first'. **/
@@ -9396,7 +10431,12 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
   // with a returned value of type value128 with a "low component" corresponding to the
   // 64-bit least significant bits of the product and with a "high component" corresponding
   // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+  _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index]);
+#else
   _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index]);
+#endif
+
   // Both i and power_of_five_128[index] have their most significant bit set to 1 which
   // implies that the either the most or the second most significant bit of the product
   // is 1. We pack values in this manner for efficiency reasons: it maximizes the use
@@ -9429,7 +10469,11 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
     // with a returned value of type value128 with a "low component" corresponding to the
     // 64-bit least significant bits of the product and with a "high component" corresponding
     // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+    _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index + 1]);
+#else
     _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index + 1]);
+#endif
     firstproduct.low += secondproduct.high;
     if(secondproduct.high > firstproduct.low) { firstproduct.high++; }
     // As it has been proven by Noble Mushtak and Daniel Lemire in "Fast Number Parsing Without
@@ -9590,7 +10634,7 @@ _simdjson_inline bool is_digit(const uint8_t c) {
   return static_cast<uint8_t>(c - '0') <= 9;
 }
 
-_simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
   // we continue with the fiction that we have an integer. If the
   // floating point number is representable as x * 10^z for some integer
   // z that fits in 53 bits, then we will be able to convert back the
@@ -9618,7 +10662,7 @@ _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const
   return SUCCESS;
 }
 
-_simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
   // Exp Sign: -123.456e[-]78
   bool neg_exp = ('-' == *p);
   if (neg_exp || '+' == *p) { p++; } // Skip + as well
@@ -9707,7 +10751,7 @@ static error_code slow_float_parsing(_simdjson_unused const uint8_t * src, doubl
 
 /** @private */
 template<typename W>
-_simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
   // If we frequently had to deal with long strings of digits,
   // we could extend our code by using a 128-bit integer instead
   // of a 64-bit integer. However, this is uncommon in practice.
@@ -9770,13 +10814,13 @@ _simdjson_inline error_code write_float(const uint8_t *const src, bool negative,
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
 
 // for performance analysis, it is sometimes  useful to skip parsing
 #ifdef _SIMDJSON_SKIPNUMBERPARSING
 
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
   writer.append_s64(0);        // always write zero
   return SUCCESS;              // always succeeds
 }
@@ -9802,7 +10846,7 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   //
   // Check for minus sign
   //
@@ -9876,7 +10920,16 @@ _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   if (i > uint64_t(INT64_MAX)) {
     WRITE_UNSIGNED(i, src, writer);
   } else {
-    WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+    if(i == 0 && negative) {
+      // We have to write -0.0 instead of 0
+      WRITE_DOUBLE(-0.0, src, writer);
+    } else {
+      WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+    }
+#else
+  WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#endif
   }
   if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return INVALID_NUMBER(src); }
   return SUCCESS;
@@ -10337,6 +11390,12 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
       if (_simdjson_unlikely(digit_count == 19 && memcmp(src, smaller_big_integer, 19) > 0)) {
         return number_type::big_integer;
       }
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+      if(digit_count == 1 && src[0] == '0') {
+        // We have to write -0.0 instead of 0
+        return number_type::floating_point_number;
+      }
+#endif
       return number_type::signed_integer;
     }
     // Let us check if we have a big integer (>=2**64).
@@ -10571,11 +11630,40 @@ _simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_resul
 }
 
 template<typename T>
-_simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
+_simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_warn_unused _simdjson_inline bool implementation__simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+template<typename T>
+_simdjson_inline T& implementation__simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& implementation__simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<implementation__simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* implementation__simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* implementation__simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& implementation__simdjson_result_base<T>::value() & noexcept(false) {
@@ -10672,13 +11760,14 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept ;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace arm64
@@ -10709,10 +11798,10 @@ namespace arm64 {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace arm64
@@ -10964,21 +12053,21 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_ARM64_NUMBERPARSING_DEFS_H
 /* end file _simdjson/arm64/numberparsing_defs.h */
-/* including _simdjson/arm64/simd.h: #include "_simdjson/arm64/simd.h" */
-/* begin file _simdjson/arm64/simd.h */
-#ifndef _SIMDJSON_ARM64_SIMD_H
-#define _SIMDJSON_ARM64_SIMD_H
+/* including _simdjson/arm64/_simd.h: #include "_simdjson/arm64/_simd.h" */
+/* begin file _simdjson/arm64/_simd.h */
+#ifndef _SIMDJSON_ARM64__SIMD_H
+#define _SIMDJSON_ARM64__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/arm64/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/arm64/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace arm64 {
 namespace {
-namespace simd {
+namespace _simd {
 
 #if _SIMDJSON_REGULAR_VISUAL_STUDIO
 namespace {
@@ -11039,52 +12128,52 @@ namespace {
 
 
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
   //
-  // Base class of simd8<uint8_t> and simd8<bool>, both of which use uint8x16_t internally.
+  // Base class of _simd8<uint8_t> and _simd8<bool>, both of which use uint8x16_t internally.
   //
-  template<typename T, typename Mask=simd8<bool>>
+  template<typename T, typename Mask=_simd8<bool>>
   struct base_u8 {
     uint8x16_t value;
     static const int SIZE = sizeof(value);
 
-    // Conversion from/to SIMD register
+    // Conversion from/to _SIMD register
     _simdjson_inline base_u8(const uint8x16_t _value) : value(_value) {}
     _simdjson_inline operator const uint8x16_t&() const { return this->value; }
     _simdjson_inline operator uint8x16_t&() { return this->value; }
 
     // Bit operations
-    _simdjson_inline simd8<T> operator|(const simd8<T> other) const { return vorrq_u8(*this, other); }
-    _simdjson_inline simd8<T> operator&(const simd8<T> other) const { return vandq_u8(*this, other); }
-    _simdjson_inline simd8<T> operator^(const simd8<T> other) const { return veorq_u8(*this, other); }
-    _simdjson_inline simd8<T> bit_andnot(const simd8<T> other) const { return vbicq_u8(*this, other); }
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
-    _simdjson_inline simd8<T>& operator|=(const simd8<T> other) { auto this_cast = static_cast<simd8<T>*>(this); *this_cast = *this_cast | other; return *this_cast; }
-    _simdjson_inline simd8<T>& operator&=(const simd8<T> other) { auto this_cast = static_cast<simd8<T>*>(this); *this_cast = *this_cast & other; return *this_cast; }
-    _simdjson_inline simd8<T>& operator^=(const simd8<T> other) { auto this_cast = static_cast<simd8<T>*>(this); *this_cast = *this_cast ^ other; return *this_cast; }
+    _simdjson_inline _simd8<T> operator|(const _simd8<T> other) const { return vorrq_u8(*this, other); }
+    _simdjson_inline _simd8<T> operator&(const _simd8<T> other) const { return vandq_u8(*this, other); }
+    _simdjson_inline _simd8<T> operator^(const _simd8<T> other) const { return veorq_u8(*this, other); }
+    _simdjson_inline _simd8<T> bit_andnot(const _simd8<T> other) const { return vbicq_u8(*this, other); }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T>& operator|=(const _simd8<T> other) { auto this_cast = static_cast<_simd8<T>*>(this); *this_cast = *this_cast | other; return *this_cast; }
+    _simdjson_inline _simd8<T>& operator&=(const _simd8<T> other) { auto this_cast = static_cast<_simd8<T>*>(this); *this_cast = *this_cast & other; return *this_cast; }
+    _simdjson_inline _simd8<T>& operator^=(const _simd8<T> other) { auto this_cast = static_cast<_simd8<T>*>(this); *this_cast = *this_cast ^ other; return *this_cast; }
 
-    friend _simdjson_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return vceqq_u8(lhs, rhs); }
+    friend _simdjson_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return vceqq_u8(lhs, rhs); }
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return vextq_u8(prev_chunk, *this, 16 - N);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base_u8<bool> {
+  struct _simd8<bool>: base_u8<bool> {
     typedef uint16_t bitmask_t;
     typedef uint32_t bitmask2_t;
 
-    static _simdjson_inline simd8<bool> splat(bool _value) { return vmovq_n_u8(uint8_t(-(!!_value))); }
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return vmovq_n_u8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8(const uint8x16_t _value) : base_u8<bool>(_value) {}
+    _simdjson_inline _simd8(const uint8x16_t _value) : base_u8<bool>(_value) {}
     // False constructor
-    _simdjson_inline simd8() : simd8(vdupq_n_u8(0)) {}
+    _simdjson_inline _simd8() : _simd8(vdupq_n_u8(0)) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : _simd8(splat(_value)) {}
 
     // We return uint32_t instead of uint16_t because that seems to be more efficient for most
     // purposes (cutting it down to uint16_t costs performance in some compilers).
@@ -11102,48 +12191,54 @@ namespace {
       tmp = vpaddq_u8(tmp, tmp);
       return vgetq_lane_u16(vreinterpretq_u16_u8(tmp), 0);
     }
+    // Returns 4-bit out of each byte, alternating between the high 4 bits and low
+    // bits result it is 64 bit.
+    _simdjson_inline uint64_t to_bitmask64() const {
+      return vget_lane_u64(
+          vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(*this), 4)), 0);
+    }
     _simdjson_inline bool any() const { return vmaxvq_u32(vreinterpretq_u32_u8(*this)) != 0; }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base_u8<uint8_t> {
+  struct _simd8<uint8_t>: base_u8<uint8_t> {
     static _simdjson_inline uint8x16_t splat(uint8_t _value) { return vmovq_n_u8(_value); }
     static _simdjson_inline uint8x16_t zero() { return vdupq_n_u8(0); }
     static _simdjson_inline uint8x16_t load(const uint8_t* values) { return vld1q_u8(values); }
 
-    _simdjson_inline simd8(const uint8x16_t _value) : base_u8<uint8_t>(_value) {}
+    _simdjson_inline _simd8(const uint8x16_t _value) : base_u8<uint8_t>(_value) {}
     // Zero constructor
-    _simdjson_inline simd8() : simd8(zero()) {}
+    _simdjson_inline _simd8() : _simd8(zero()) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[16]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[16]) : _simd8(load(values)) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Member-by-member initialization
 #if _SIMDJSON_REGULAR_VISUAL_STUDIO
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(_simdjson_make_uint8x16_t(
+    ) : _simd8(_simdjson_make_uint8x16_t(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
 #else
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(uint8x16_t{
+    ) : _simd8(uint8x16_t{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     }) {}
 #endif
 
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -11153,51 +12248,56 @@ namespace {
     _simdjson_inline void store(uint8_t dst[16]) const { return vst1q_u8(dst, *this); }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return vqaddq_u8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return vqsubq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return vqaddq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return vqsubq_u8(*this, other); }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<uint8_t> operator+(const simd8<uint8_t> other) const { return vaddq_u8(*this, other); }
-    _simdjson_inline simd8<uint8_t> operator-(const simd8<uint8_t> other) const { return vsubq_u8(*this, other); }
-    _simdjson_inline simd8<uint8_t>& operator+=(const simd8<uint8_t> other) { *this = *this + other; return *this; }
-    _simdjson_inline simd8<uint8_t>& operator-=(const simd8<uint8_t> other) { *this = *this - other; return *this; }
+    _simdjson_inline _simd8<uint8_t> operator+(const _simd8<uint8_t> other) const { return vaddq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> operator-(const _simd8<uint8_t> other) const { return vsubq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t>& operator+=(const _simd8<uint8_t> other) { *this = *this + other; return *this; }
+    _simdjson_inline _simd8<uint8_t>& operator-=(const _simd8<uint8_t> other) { *this = *this - other; return *this; }
 
     // Order-specific operations
     _simdjson_inline uint8_t max_val() const { return vmaxvq_u8(*this); }
     _simdjson_inline uint8_t min_val() const { return vminvq_u8(*this); }
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return vmaxq_u8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return vminq_u8(*this, other); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return vcleq_u8(*this, other); }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return vcgeq_u8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return vcltq_u8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return vcgtq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return vmaxq_u8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return vminq_u8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return vcleq_u8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return vcgeq_u8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return vcltq_u8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return vcgtq_u8(*this, other); }
     // Same as >, but instead of guaranteeing all 1's == true, false = 0 and true = nonzero. For ARM, returns all 1's.
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this > other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return _simd8<uint8_t>(*this > other); }
     // Same as <, but instead of guaranteeing all 1's == true, false = 0 and true = nonzero. For ARM, returns all 1's.
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this < other); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return _simd8<uint8_t>(*this < other); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return vtstq_u8(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere() const { return this->max_val() != 0; }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return vtstq_u8(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere() const { return vmaxvq_u32(vreinterpretq_u32_u8(*this)) != 0; }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return vshlq_n_u8(*this, N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return vshlq_n_u8(*this, N); }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return lookup_table.apply_lookup_16_to(*this);
     }
 
-
+    // Returns 4-bit out of each byte, alternating between the high 4 bits and low
+    // bits result it is 64 bit.
+    _simdjson_inline uint64_t to_bitmask64() const {
+      return vget_lane_u64(
+          vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(*this), 4)), 0);
+    }
     // Copies to 'output" all bytes corresponding to a 0 in the mask (interpreted as a bitset).
     // Passing a 0 value for mask would be equivalent to writing out every byte to output.
     // Only the first 16 - count_ones(mask) bytes of the result are significant but 16 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint16_t mask) would be
+    // signature _simd8<L> compress(uint16_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint16_t mask, L * output) const {
@@ -11256,12 +12356,12 @@ namespace {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -11270,55 +12370,55 @@ namespace {
     }
 
     template<typename T>
-    _simdjson_inline simd8<uint8_t> apply_lookup_16_to(const simd8<T> original) {
-      return vqtbl1q_u8(*this, simd8<uint8_t>(original));
+    _simdjson_inline _simd8<uint8_t> apply_lookup_16_to(const _simd8<T> original) {
+      return vqtbl1q_u8(*this, _simd8<uint8_t>(original));
     }
   };
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> {
+  struct _simd8<int8_t> {
     int8x16_t value;
 
-    static _simdjson_inline simd8<int8_t> splat(int8_t _value) { return vmovq_n_s8(_value); }
-    static _simdjson_inline simd8<int8_t> zero() { return vdupq_n_s8(0); }
-    static _simdjson_inline simd8<int8_t> load(const int8_t values[16]) { return vld1q_s8(values); }
+    static _simdjson_inline _simd8<int8_t> splat(int8_t _value) { return vmovq_n_s8(_value); }
+    static _simdjson_inline _simd8<int8_t> zero() { return vdupq_n_s8(0); }
+    static _simdjson_inline _simd8<int8_t> load(const int8_t values[16]) { return vld1q_s8(values); }
 
-    // Conversion from/to SIMD register
-    _simdjson_inline simd8(const int8x16_t _value) : value{_value} {}
+    // Conversion from/to _SIMD register
+    _simdjson_inline _simd8(const int8x16_t _value) : value{_value} {}
     _simdjson_inline operator const int8x16_t&() const { return this->value; }
     _simdjson_inline operator int8x16_t&() { return this->value; }
 
     // Zero constructor
-    _simdjson_inline simd8() : simd8(zero()) {}
+    _simdjson_inline _simd8() : _simd8(zero()) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
 #if _SIMDJSON_REGULAR_VISUAL_STUDIO
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3, int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8(_simdjson_make_int8x16_t(
+    ) : _simd8(_simdjson_make_int8x16_t(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
 #else
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3, int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8(int8x16_t{
+    ) : _simd8(int8x16_t{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     }) {}
 #endif
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -11333,40 +12433,40 @@ namespace {
     // In theory, we could check this occurrence with std::same_as and std::enabled_if but it is C++14
     // and relatively ugly and hard to read.
 #ifndef _SIMDJSON_REGULAR_VISUAL_STUDIO
-    _simdjson_inline explicit simd8(const uint8x16_t other): simd8(vreinterpretq_s8_u8(other)) {}
+    _simdjson_inline explicit _simd8(const uint8x16_t other): _simd8(vreinterpretq_s8_u8(other)) {}
 #endif
-    _simdjson_inline explicit operator simd8<uint8_t>() const { return vreinterpretq_u8_s8(this->value); }
+    _simdjson_inline explicit operator _simd8<uint8_t>() const { return vreinterpretq_u8_s8(this->value); }
 
     // Math
-    _simdjson_inline simd8<int8_t> operator+(const simd8<int8_t> other) const { return vaddq_s8(*this, other); }
-    _simdjson_inline simd8<int8_t> operator-(const simd8<int8_t> other) const { return vsubq_s8(*this, other); }
-    _simdjson_inline simd8<int8_t>& operator+=(const simd8<int8_t> other) { *this = *this + other; return *this; }
-    _simdjson_inline simd8<int8_t>& operator-=(const simd8<int8_t> other) { *this = *this - other; return *this; }
+    _simdjson_inline _simd8<int8_t> operator+(const _simd8<int8_t> other) const { return vaddq_s8(*this, other); }
+    _simdjson_inline _simd8<int8_t> operator-(const _simd8<int8_t> other) const { return vsubq_s8(*this, other); }
+    _simdjson_inline _simd8<int8_t>& operator+=(const _simd8<int8_t> other) { *this = *this + other; return *this; }
+    _simdjson_inline _simd8<int8_t>& operator-=(const _simd8<int8_t> other) { *this = *this - other; return *this; }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return vmaxq_s8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return vminq_s8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return vcgtq_s8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return vcltq_s8(*this, other); }
-    _simdjson_inline simd8<bool> operator==(const simd8<int8_t> other) const { return vceqq_s8(*this, other); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return vmaxq_s8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return vminq_s8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return vcgtq_s8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return vcltq_s8(*this, other); }
+    _simdjson_inline _simd8<bool> operator==(const _simd8<int8_t> other) const { return vceqq_s8(*this, other); }
 
     template<int N=1>
-    _simdjson_inline simd8<int8_t> prev(const simd8<int8_t> prev_chunk) const {
+    _simdjson_inline _simd8<int8_t> prev(const _simd8<int8_t> prev_chunk) const {
       return vextq_s8(prev_chunk, *this, 16 - N);
     }
 
     // Perform a lookup assuming no value is larger than 16
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return lookup_table.apply_lookup_16_to(*this);
     }
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -11375,32 +12475,32 @@ namespace {
     }
 
     template<typename T>
-    _simdjson_inline simd8<int8_t> apply_lookup_16_to(const simd8<T> original) {
-      return vqtbl1q_s8(*this, simd8<uint8_t>(original));
+    _simdjson_inline _simd8<int8_t> apply_lookup_16_to(const _simd8<T> original) {
+      return vqtbl1q_s8(*this, _simd8<uint8_t>(original));
     }
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 4, "ARM kernel should use four registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1, const simd8<T> chunk2, const simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+16), simd8<T>::load(ptr+32), simd8<T>::load(ptr+48)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1, const _simd8<T> chunk2, const _simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+16), _simd8<T>::load(ptr+32), _simd8<T>::load(ptr+48)} {}
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
-      this->chunks[2].store(ptr+sizeof(simd8<T>)*2);
-      this->chunks[3].store(ptr+sizeof(simd8<T>)*3);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
+      this->chunks[2].store(ptr+sizeof(_simd8<T>)*2);
+      this->chunks[3].store(ptr+sizeof(_simd8<T>)*3);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return (this->chunks[0] | this->chunks[1]) | (this->chunks[2] | this->chunks[3]);
     }
 
@@ -11437,8 +12537,8 @@ namespace {
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask,
         this->chunks[2] == mask,
@@ -11447,23 +12547,23 @@ namespace {
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask,
         this->chunks[2] <= mask,
         this->chunks[3] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace arm64
 } // namespace _simdjson
 
-#endif // _SIMDJSON_ARM64_SIMD_H
-/* end file _simdjson/arm64/simd.h */
+#endif // _SIMDJSON_ARM64__SIMD_H
+/* end file _simdjson/arm64/_simd.h */
 /* including _simdjson/arm64/stringparsing_defs.h: #include "_simdjson/arm64/stringparsing_defs.h" */
 /* begin file _simdjson/arm64/stringparsing_defs.h */
 #ifndef _SIMDJSON_ARM64_STRINGPARSING_DEFS_H
@@ -11471,7 +12571,7 @@ namespace {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/arm64/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/arm64/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/arm64/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/arm64/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -11479,13 +12579,13 @@ namespace _simdjson {
 namespace arm64 {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return bs_bits != 0; }
@@ -11500,19 +12600,45 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 31 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v0(src);
-  simd8<uint8_t> v1(src + sizeof(v0));
+  _simd8<uint8_t> v0(src);
+  _simd8<uint8_t> v1(src + sizeof(v0));
   v0.store(dst);
   v1.store(dst + sizeof(v0));
 
   // Getting a 64-bit bitmask is much cheaper than multiple 16-bit bitmasks on ARM; therefore, we
   // smash them together into a 64-byte mask and get the bitmask from there.
-  uint64_t bs_and_quote = simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
+  uint64_t bs_and_quote = _simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
   return {
     uint32_t(bs_and_quote),      // bs_bits
     uint32_t(bs_and_quote >> 32) // quote_bits
   };
 }
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits) / 4; }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    (is_backslash | is_quote | is_control).to_bitmask64()
+  };
+}
+
+
 
 } // unnamed namespace
 } // namespace arm64
@@ -11566,8 +12692,8 @@ namespace _simdjson {
 namespace arm64 {
 namespace {
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3);
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input);
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3);
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input);
 
 } // unnamed namespace
 } // namespace arm64
@@ -11589,7 +12715,7 @@ namespace arm64 {
 namespace {
 
 struct json_character_block {
-  static _simdjson_inline json_character_block classify(const simd::simd8x64<uint8_t>& in);
+  static _simdjson_inline json_character_block classify(const _simd::_simd8x64<uint8_t>& in);
 
   _simdjson_inline uint64_t whitespace() const noexcept { return _whitespace; }
   _simdjson_inline uint64_t op() const noexcept { return _op; }
@@ -11691,38 +12817,38 @@ private:
 
 // Routines to print masks and text for debugging bitmask operations
 _simdjson_unused static char * format_input_text_64(const uint8_t *text) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     buf[i] = int8_t(text[i]) < ' ' ? '_' : int8_t(text[i]);
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 // Routines to print masks and text for debugging bitmask operations
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] < ' ') { buf[i] = '_'; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in, uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in, uint64_t mask) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] <= ' ') { buf[i] = '_'; }
     if (!(mask & (size_t(1) << i))) { buf[i] = ' '; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 _simdjson_unused static char * format_mask(uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   for (size_t i=0; i<64; i++) {
     buf[i] = (mask & (size_t(1) << i)) ? 'X' : ' ';
   }
@@ -11964,7 +13090,7 @@ struct json_string_block {
 // Scans blocks for string characters, storing the state necessary to do so
 class json_string_scanner {
 public:
-  _simdjson_really_inline json_string_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_really_inline json_string_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
   _simdjson_really_inline error_code finish();
 
@@ -11983,7 +13109,7 @@ private:
 //
 // Backslash sequences outside of quotes will be detected in stage 2.
 //
-_simdjson_really_inline json_string_block json_string_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_really_inline json_string_block json_string_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   const uint64_t backslash = in.eq('\\');
   const uint64_t escaped = escape_scanner.next(backslash).escaped;
   const uint64_t quote = in.eq('"') & ~escaped;
@@ -12037,9 +13163,9 @@ namespace arm64 {
 namespace {
 namespace utf8_validation {
 
-using namespace simd;
+using namespace _simd;
 
-  _simdjson_inline simd8<uint8_t> check_special_cases(const simd8<uint8_t> input, const simd8<uint8_t> prev1) {
+  _simdjson_inline _simd8<uint8_t> check_special_cases(const _simd8<uint8_t> input, const _simd8<uint8_t> prev1) {
 // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
 // Bit 1 = Too Long (ASCII followed by continuation)
 // Bit 2 = Overlong 3-byte
@@ -12067,7 +13193,7 @@ using namespace simd;
                                                 // 11111___ 1000____
     constexpr const uint8_t OVERLONG_4  = 1<<6; // 11110000 1000____
 
-    const simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
       // 0_______ ________ <ASCII in byte 1>
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
@@ -12083,7 +13209,7 @@ using namespace simd;
       TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4
     );
     constexpr const uint8_t CARRY = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-    const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
       // ____0000 ________
       CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
       // ____0001 ________
@@ -12111,7 +13237,7 @@ using namespace simd;
       CARRY | TOO_LARGE | TOO_LARGE_1000,
       CARRY | TOO_LARGE | TOO_LARGE_1000
     );
-    const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
       // ________ 0_______ <ASCII in byte 2>
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -12129,12 +13255,12 @@ using namespace simd;
     );
     return (byte_1_high & byte_1_low & byte_2_high);
   }
-  _simdjson_inline simd8<uint8_t> check_multibyte_lengths(const simd8<uint8_t> input,
-      const simd8<uint8_t> prev_input, const simd8<uint8_t> sc) {
-    simd8<uint8_t> prev2 = input.prev<2>(prev_input);
-    simd8<uint8_t> prev3 = input.prev<3>(prev_input);
-    simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
-    simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
+  _simdjson_inline _simd8<uint8_t> check_multibyte_lengths(const _simd8<uint8_t> input,
+      const _simd8<uint8_t> prev_input, const _simd8<uint8_t> sc) {
+    _simd8<uint8_t> prev2 = input.prev<2>(prev_input);
+    _simd8<uint8_t> prev3 = input.prev<3>(prev_input);
+    _simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
+    _simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
     return must23_80 ^ sc;
   }
 
@@ -12142,7 +13268,7 @@ using namespace simd;
   // Return nonzero if there are incomplete multibyte characters at the end of the block:
   // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
   //
-  _simdjson_inline simd8<uint8_t> is_incomplete(const simd8<uint8_t> input) {
+  _simdjson_inline _simd8<uint8_t> is_incomplete(const _simd8<uint8_t> input) {
     // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
     // ... 1111____ 111_____ 11______
 #if _SIMDJSON_IMPLEMENTATION_ICELAKE
@@ -12164,26 +13290,26 @@ using namespace simd;
       255, 255, 255, 255, 255, 0xf0u-1, 0xe0u-1, 0xc0u-1
     };
 #endif
-    const simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(simd8<uint8_t>)]);
+    const _simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(_simd8<uint8_t>)]);
     return input.gt_bits(max_value);
   }
 
   struct utf8_checker {
     // If this is nonzero, there has been a UTF-8 error.
-    simd8<uint8_t> error;
+    _simd8<uint8_t> error;
     // The last input we received
-    simd8<uint8_t> prev_input_block;
+    _simd8<uint8_t> prev_input_block;
     // Whether the last input we received was incomplete (used for ASCII fast path)
-    simd8<uint8_t> prev_incomplete;
+    _simd8<uint8_t> prev_incomplete;
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    _simdjson_inline void check_utf8_bytes(const simd8<uint8_t> input, const simd8<uint8_t> prev_input) {
+    _simdjson_inline void check_utf8_bytes(const _simd8<uint8_t> input, const _simd8<uint8_t> prev_input) {
       // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
       // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
-      simd8<uint8_t> prev1 = input.prev<1>(prev_input);
-      simd8<uint8_t> sc = check_special_cases(input, prev1);
+      _simd8<uint8_t> prev1 = input.prev<1>(prev_input);
+      _simd8<uint8_t> sc = check_special_cases(input, prev1);
       this->error |= check_multibyte_lengths(input, prev_input, sc);
     }
 
@@ -12196,32 +13322,32 @@ using namespace simd;
       this->error |= this->prev_incomplete;
     }
 
-    _simdjson_inline void check_next_input(const simd8x64<uint8_t>& input) {
+    _simdjson_inline void check_next_input(const _simd8x64<uint8_t>& input) {
       if(_simdjson_likely(is_ascii(input))) {
         this->error |= this->prev_incomplete;
       } else {
         // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
-        static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 1)
-                ||(simd8x64<uint8_t>::NUM_CHUNKS == 2)
-                || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
+        static_assert((_simd8x64<uint8_t>::NUM_CHUNKS == 1)
+                ||(_simd8x64<uint8_t>::NUM_CHUNKS == 2)
+                || (_simd8x64<uint8_t>::NUM_CHUNKS == 4),
                 "We support one, two or four chunks per 64-byte block.");
-        _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 1) {
+        _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 1) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 2) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 2) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 4) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 4) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
           this->check_utf8_bytes(input.chunks[2], input.chunks[1]);
           this->check_utf8_bytes(input.chunks[3], input.chunks[2]);
         }
-        this->prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
-        this->prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
+        this->prev_incomplete = is_incomplete(input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1]);
+        this->prev_input_block = input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1];
       }
     }
     // do not forget to call check_eof!
-    _simdjson_inline error_code errors() {
+    _simdjson_warn_unused _simdjson_inline error_code errors() {
       return this->error.any_bits_set_anywhere() ? error_code::UTF8_ERROR : error_code::SUCCESS;
     }
 
@@ -12344,9 +13470,9 @@ private:
 class json_scanner {
 public:
   json_scanner() = default;
-  _simdjson_inline json_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_inline json_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
-  _simdjson_inline error_code finish();
+  _simdjson_warn_unused _simdjson_inline error_code finish();
 
 private:
   // Whether the last character of the previous iteration is part of a scalar token
@@ -12369,7 +13495,7 @@ _simdjson_inline uint64_t follows(const uint64_t match, uint64_t &overflow) {
   return result;
 }
 
-_simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_block json_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   json_string_block strings = string_scanner.next(in);
   // identifies the white-space and the structural characters
   json_character_block characters = json_character_block::classify(in);
@@ -12394,7 +13520,7 @@ _simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in
   );
 }
 
-_simdjson_inline error_code json_scanner::finish() {
+_simdjson_warn_unused _simdjson_inline error_code json_scanner::finish() {
   return string_scanner.finish();
 }
 
@@ -12547,18 +13673,18 @@ private:
   {}
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block_buf, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block);
-  _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block);
+  _simdjson_warn_unused _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
   json_scanner scanner{};
   uint8_t *dst;
 };
 
-_simdjson_inline void json_minifier::next(const simd::simd8x64<uint8_t>& in, const json_block& block) {
+_simdjson_inline void json_minifier::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block) {
   uint64_t mask = block.whitespace();
   dst += in.compress(mask, dst);
 }
 
-_simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
+_simdjson_warn_unused _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
   error_code error = scanner.finish();
   if (error) { dst_len = 0; return error; }
   dst_len = dst - dst_start;
@@ -12567,8 +13693,8 @@ _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &ds
 
 template<>
 _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
-  simd::simd8x64<uint8_t> in_2(block_buf+64);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_2(block_buf+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1);
@@ -12578,7 +13704,7 @@ _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_blo
 
 template<>
 _simdjson_inline void json_minifier::step<64>(const uint8_t *block_buf, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
   json_block block_1 = scanner.next(in_1);
   this->next(block_buf, block_1);
   reader.advance();
@@ -12766,8 +13892,8 @@ private:
   _simdjson_inline json_structural_indexer(uint32_t *structural_indexes);
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx);
-  _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx);
+  _simdjson_warn_unused _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
 
   json_scanner scanner{};
   utf8_checker checker{};
@@ -12845,8 +13971,8 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
 
 template<>
 _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
-  simd::simd8x64<uint8_t> in_2(block+64);
+  _simd::_simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_2(block+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1, reader.block_index());
@@ -12856,13 +13982,13 @@ _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, b
 
 template<>
 _simdjson_inline void json_structural_indexer::step<64>(const uint8_t *block, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_1(block);
   json_block block_1 = scanner.next(in_1);
   this->next(in_1, block_1, reader.block_index());
   reader.advance();
 }
 
-_simdjson_inline void json_structural_indexer::next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
+_simdjson_inline void json_structural_indexer::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
   uint64_t unescaped = in.lteq(0x1F);
 #if _SIMDJSON_UTF8VALIDATION
   checker.check_next_input(in);
@@ -13007,13 +14133,13 @@ bool generic_validate_utf8(const uint8_t * input, size_t length) {
     checker c{};
     buf_block_reader<64> reader(input, length);
     while (reader.has_full_block()) {
-      simd::simd8x64<uint8_t> in(reader.full_block());
+      _simd::_simd8x64<uint8_t> in(reader.full_block());
       c.check_next_input(in);
       reader.advance();
     }
     uint8_t block[64]{};
     reader.get_remainder(block);
-    simd::simd8x64<uint8_t> in(block);
+    _simd::_simd8x64<uint8_t> in(block);
     c.check_next_input(in);
     reader.advance();
     c.check_eof();
@@ -13619,6 +14745,7 @@ _simdjson_warn_unused _simdjson_inline error_code json_iterator::visit_primitive
 /* end file generic/stage2/json_iterator.h for arm64 */
 /* including generic/stage2/stringparsing.h for arm64: #include <generic/stage2/stringparsing.h> */
 /* begin file generic/stage2/stringparsing.h for arm64 */
+#include <cstdint>
 #ifndef _SIMDJSON_SRC_GENERIC_STAGE2_STRINGPARSING_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
@@ -13771,7 +14898,8 @@ _simdjson_inline bool handle_unicode_codepoint_wobbly(const uint8_t **src_ptr,
 _simdjson_warn_unused _simdjson_inline uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) {
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -13816,7 +14944,8 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
   // It is not ideal that this function is nearly identical to parse_string.
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -13858,6 +14987,7 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
 }
 
 } // namespace stringparsing
+
 } // unnamed namespace
 } // namespace arm64
 } // namespace _simdjson
@@ -14255,22 +15385,22 @@ _simdjson_warn_unused error_code implementation::create_dom_parser_implementatio
 
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
-_simdjson_inline json_character_block json_character_block::classify(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_character_block json_character_block::classify(const _simd::_simd8x64<uint8_t>& in) {
   // Functional programming causes trouble with Visual Studio.
   // Keeping this version in comments since it is much nicer:
-  // auto v = in.map<uint8_t>([&](simd8<uint8_t> chunk) {
+  // auto v = in.map<uint8_t>([&](_simd8<uint8_t> chunk) {
   //  auto nib_lo = chunk & 0xf;
   //  auto nib_hi = chunk.shr<4>();
   //  auto shuf_lo = nib_lo.lookup_16<uint8_t>(16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0);
   //  auto shuf_hi = nib_hi.lookup_16<uint8_t>(8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0);
   //  return shuf_lo & shuf_hi;
   // });
-  const simd8<uint8_t> table1(16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0);
-  const simd8<uint8_t> table2(8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0);
+  const _simd8<uint8_t> table1(16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0);
+  const _simd8<uint8_t> table2(8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0);
 
-  simd8x64<uint8_t> v(
+  _simd8x64<uint8_t> v(
      (in.chunks[0] & 0xf).lookup_16(table1) & (in.chunks[0].shr<4>()).lookup_16(table2),
      (in.chunks[1] & 0xf).lookup_16(table1) & (in.chunks[1].shr<4>()).lookup_16(table2),
      (in.chunks[2] & 0xf).lookup_16(table1) & (in.chunks[2].shr<4>()).lookup_16(table2),
@@ -14294,14 +15424,14 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   // there is a small untaken optimization opportunity here. We deliberately
   // do not pick it up.
 
-  uint64_t op = simd8x64<bool>(
+  uint64_t op = _simd8x64<bool>(
         v.chunks[0].any_bits_set(0x7),
         v.chunks[1].any_bits_set(0x7),
         v.chunks[2].any_bits_set(0x7),
         v.chunks[3].any_bits_set(0x7)
   ).to_bitmask();
 
-  uint64_t whitespace = simd8x64<bool>(
+  uint64_t whitespace = _simd8x64<bool>(
         v.chunks[0].any_bits_set(0x18),
         v.chunks[1].any_bits_set(0x18),
         v.chunks[2].any_bits_set(0x18),
@@ -14311,15 +15441,15 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   return { whitespace, op };
 }
 
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input) {
-    simd8<uint8_t> bits = input.reduce_or();
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input) {
+    _simd8<uint8_t> bits = input.reduce_or();
     return bits.max_val() < 0x80u;
 }
 
-_simdjson_unused _simdjson_inline simd8<bool> must_be_continuation(const simd8<uint8_t> prev1, const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-    simd8<bool> is_second_byte = prev1 >= uint8_t(0xc0u);
-    simd8<bool> is_third_byte  = prev2 >= uint8_t(0xe0u);
-    simd8<bool> is_fourth_byte = prev3 >= uint8_t(0xf0u);
+_simdjson_unused _simdjson_inline _simd8<bool> must_be_continuation(const _simd8<uint8_t> prev1, const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+    _simd8<bool> is_second_byte = prev1 >= uint8_t(0xc0u);
+    _simd8<bool> is_third_byte  = prev2 >= uint8_t(0xe0u);
+    _simd8<bool> is_fourth_byte = prev3 >= uint8_t(0xf0u);
     // Use ^ instead of | for is_*_byte, because ^ is commutative, and the caller is using ^ as well.
     // This will work fine because we only have to report errors for cases with 0-1 lead bytes.
     // Multiple lead bytes implies 2 overlapping multibyte characters, and if that happens, there is
@@ -14328,9 +15458,9 @@ _simdjson_unused _simdjson_inline simd8<bool> must_be_continuation(const simd8<u
     return is_second_byte ^ is_third_byte ^ is_fourth_byte;
 }
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-    simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
-    simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+    _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
+    _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
     return is_third_byte | is_fourth_byte;
 }
 
@@ -14361,20 +15491,22 @@ _simdjson_warn_unused error_code dom_parser_implementation::stage1(const uint8_t
 _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t len) const noexcept {
   return arm64::stage1::generic_validate_utf8(buf,len);
 }
+
 _simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
-  return arm64::stringparsing::parse_string(src, dst, allow_replacement);
+    return arm64::stringparsing::parse_string(src, dst, allow_replacement);
 }
 
+
 _simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return  arm64::atomparsing::is_valid_true_atom(src, len);
+    return arm64::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return  arm64::atomparsing::is_valid_false_atom(src, len);
+    return arm64::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return arm64::atomparsing::is_valid_null_atom(src, len);
+    return arm64::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
@@ -14400,29 +15532,32 @@ _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_wobbly_string(co
   return arm64::stringparsing::parse_wobbly_string(src, dst);
 }
 
+
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return arm64::atomparsing::is_valid_true_atom(src, len);
+    return arm64::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return arm64::atomparsing::is_valid_false_atom(src, len);
+    return arm64::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return arm64::atomparsing::is_valid_null_atom(src, len);
+    return arm64::atomparsing::is_valid_null_atom(src, len);
 }
 
-_simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
 
-  return arm64::numberparsing::parse_number(src, writer);
+_simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
+    stage2::tape_writer writer{ buf };
+
+    return arm64::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse(const uint8_t* _buf, size_t _len, dom::document& _doc, bool all) noexcept {
-  auto error = stage1(_buf, _len, stage1_mode::regular);
-  if (error) { return error; } if (!all) { return error_code(); }
-  return stage2(_doc);
+    auto error = stage1(_buf, _len, stage1_mode::regular);
+    if (error) { return error; } if (!all) { return error_code(); }
+    return stage2(_doc);
 }
+
 
 } // namespace arm64
 } // namespace _simdjson
@@ -14480,10 +15615,10 @@ namespace haswell {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace haswell
@@ -14728,22 +15863,22 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_HASWELL_NUMBERPARSING_DEFS_H
 /* end file _simdjson/haswell/numberparsing_defs.h */
-/* including _simdjson/haswell/simd.h: #include "_simdjson/haswell/simd.h" */
-/* begin file _simdjson/haswell/simd.h */
-#ifndef _SIMDJSON_HASWELL_SIMD_H
-#define _SIMDJSON_HASWELL_SIMD_H
+/* including _simdjson/haswell/_simd.h: #include "_simdjson/haswell/_simd.h" */
+/* begin file _simdjson/haswell/_simd.h */
+#ifndef _SIMDJSON_HASWELL__SIMD_H
+#define _SIMDJSON_HASWELL__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/intrinsics.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace haswell {
 namespace {
-namespace simd {
+namespace _simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename Child>
@@ -14753,10 +15888,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m256i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m256i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m256i&() const { return this->value; }
     _simdjson_inline operator __m256i&() { return this->value; }
 
@@ -14772,54 +15907,54 @@ namespace simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
     typedef uint32_t bitmask_t;
     typedef uint64_t bitmask2_t;
 
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m256i _value) : base<simd8<T>>(_value) {}
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m256i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_really_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return _mm256_cmpeq_epi8(lhs, rhs); }
+    friend _simdjson_really_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return _mm256_cmpeq_epi8(lhs, rhs); }
 
     static const int SIZE = sizeof(base<T>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return _mm256_alignr_epi8(*this, _mm256_permute2x128_si256(prev_chunk, *this, 0x21), 16 - N);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return _mm256_set1_epi8(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return _mm256_set1_epi8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m256i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const { return _mm256_movemask_epi8(*this); }
     _simdjson_inline bool any() const { return !_mm256_testz_si256(*this, *this); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return _mm256_set1_epi8(_value); }
-    static _simdjson_inline simd8<T> zero() { return _mm256_setzero_si256(); }
-    static _simdjson_inline simd8<T> load(const T values[32]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return _mm256_set1_epi8(_value); }
+    static _simdjson_inline _simd8<T> zero() { return _mm256_setzero_si256(); }
+    static _simdjson_inline _simd8<T> load(const T values[32]) {
       return _mm256_loadu_si256(reinterpret_cast<const __m256i *>(values));
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -14834,17 +15969,17 @@ namespace simd {
     _simdjson_inline void store(T dst[32]) const { return _mm256_storeu_si256(reinterpret_cast<__m256i *>(dst), *this); }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return _mm256_add_epi8(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return _mm256_sub_epi8(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return _mm256_add_epi8(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return _mm256_sub_epi8(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return _mm256_shuffle_epi8(lookup_table, *this);
     }
 
@@ -14853,7 +15988,7 @@ namespace simd {
     // Only the first 32 - count_ones(mask) bytes of the result are significant but 32 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint32_t mask) would be
+    // signature _simd8<L> compress(uint32_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint32_t mask, L * output) const {
@@ -14891,7 +16026,7 @@ namespace simd {
       __m256i almostthere =  _mm256_shuffle_epi8(pruned, compactmask);
       // We just need to write out the result.
       // This is the tricky bit that is hard to do
-      // if we want to return a SIMD register, since there
+      // if we want to return a _SIMD register, since there
       // is no single-instruction approach to recombine
       // the two 128-bit lanes with an offset.
       __m128i v128;
@@ -14902,12 +16037,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -14918,31 +16053,31 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m256i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t values[32]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t values[32]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15,
       int8_t v16, int8_t v17, int8_t v18, int8_t v19, int8_t v20, int8_t v21, int8_t v22, int8_t v23,
       int8_t v24, int8_t v25, int8_t v26, int8_t v27, int8_t v28, int8_t v29, int8_t v30, int8_t v31
-    ) : simd8(_mm256_setr_epi8(
+    ) : _simd8(_mm256_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,
       v24,v25,v26,v27,v28,v29,v30,v31
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -14951,39 +16086,39 @@ namespace simd {
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return _mm256_max_epi8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return _mm256_min_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return _mm256_cmpgt_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return _mm256_cmpgt_epi8(other, *this); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return _mm256_max_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return _mm256_min_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return _mm256_cmpgt_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return _mm256_cmpgt_epi8(other, *this); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m256i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[32]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[32]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15,
       uint8_t v16, uint8_t v17, uint8_t v18, uint8_t v19, uint8_t v20, uint8_t v21, uint8_t v22, uint8_t v23,
       uint8_t v24, uint8_t v25, uint8_t v26, uint8_t v27, uint8_t v28, uint8_t v29, uint8_t v30, uint8_t v31
-    ) : simd8(_mm256_setr_epi8(
+    ) : _simd8(_mm256_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,
       v24,v25,v26,v27,v28,v29,v30,v31
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -14992,35 +16127,35 @@ namespace simd {
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return _mm256_adds_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return _mm256_subs_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return _mm256_adds_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return _mm256_subs_epu8(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return _mm256_max_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return _mm256_min_epu8(other, *this); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return _mm256_max_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return _mm256_min_epu8(other, *this); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const { return _mm256_movemask_epi8(*this) == 0; }
     _simdjson_inline bool bits_not_set_anywhere() const { return _mm256_testz_si256(*this, *this); }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return _mm256_testz_si256(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const { return _mm256_testz_si256(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm256_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(_mm256_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm256_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(_mm256_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
     // Get one of the bits and make a bitmask out of it.
     // e.g. value.get_bit<7>() gets the high bit
     template<int N>
@@ -15028,17 +16163,17 @@ namespace simd {
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 2, "Haswell kernel should use two registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1) : chunks{chunk0, chunk1} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+32)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1) : chunks{chunk0, chunk1} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+32)} {}
 
     _simdjson_inline uint64_t compress(uint64_t mask, T * output) const {
       uint32_t mask1 = uint32_t(mask);
@@ -15049,8 +16184,8 @@ namespace simd {
     }
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
     }
 
     _simdjson_inline uint64_t to_bitmask() const {
@@ -15059,50 +16194,50 @@ namespace simd {
       return r_lo | (r_hi << 32);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return this->chunks[0] | this->chunks[1];
     }
 
-    _simdjson_inline simd8x64<T> bit_or(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return simd8x64<T>(
+    _simdjson_inline _simd8x64<T> bit_or(const T m) const {
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return _simd8x64<T>(
         this->chunks[0] | mask,
         this->chunks[1] | mask
       );
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1]
       ).to_bitmask();
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 
 } // unnamed namespace
 } // namespace haswell
 } // namespace _simdjson
 
-#endif // _SIMDJSON_HASWELL_SIMD_H
-/* end file _simdjson/haswell/simd.h */
+#endif // _SIMDJSON_HASWELL__SIMD_H
+/* end file _simdjson/haswell/_simd.h */
 /* including _simdjson/haswell/stringparsing_defs.h: #include "_simdjson/haswell/stringparsing_defs.h" */
 /* begin file _simdjson/haswell/stringparsing_defs.h */
 #ifndef _SIMDJSON_HASWELL_STRINGPARSING_DEFS_H
@@ -15110,7 +16245,7 @@ namespace simd {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/haswell/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/haswell/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -15118,13 +16253,13 @@ namespace _simdjson {
 namespace haswell {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return ((quote_bits - 1) & bs_bits) != 0; }
@@ -15139,12 +16274,37 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 15 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v(src);
+  _simd8<uint8_t> v(src);
   // store to dest unconditionally - we can overwrite the bits we don't like later
   v.store(dst);
   return {
       static_cast<uint32_t>((v == '\\').to_bitmask()),     // bs_bits
       static_cast<uint32_t>((v == '"').to_bitmask()), // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 32;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    uint64_t((is_backslash | is_quote | is_control).to_bitmask())
   };
 }
 
@@ -15436,26 +16596,28 @@ public:
   /** Document passed to stage 2 */
   dom::document *doc{};
 
-  ~dom_parser_implementation() {}
-
   inline dom_parser_implementation() noexcept;
   inline dom_parser_implementation(dom_parser_implementation &&other) noexcept;
   inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
   dom_parser_implementation(const dom_parser_implementation &) = delete;
   dom_parser_implementation &operator=(const dom_parser_implementation &) = delete;
-  virtual _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
 
-  virtual _simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
-  virtual  uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
+  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
+  _simdjson_warn_unused error_code stage1(const uint8_t* buf, size_t len, stage1_mode partial) noexcept final;
+  _simdjson_warn_unused error_code stage2(dom::document& doc) noexcept final;
+  _simdjson_warn_unused error_code stage2_next(dom::document& doc) noexcept final;
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept final;
+  _simdjson_warn_unused uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept final;
+
+
   _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
   _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
-  virtual  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
-  virtual inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
+  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
+  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
 private:
   _simdjson_inline _simdjson_warn_unused error_code set_capacity_stage1(size_t capacity);
 
@@ -15571,12 +16733,17 @@ struct implementation__simdjson_result_base {
    *
    * @param value The variable to assign the value to. May not be set if there is an error.
    */
-  _simdjson_inline error_code get(T &value) && noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
    * The error.
    */
-  _simdjson_inline error_code error() const noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code error() const noexcept;
+
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_warn_unused _simdjson_inline bool has_value() const noexcept;
 
 #if _SIMDJSON_EXCEPTIONS
 
@@ -15585,6 +16752,16 @@ struct implementation__simdjson_result_base {
    *
    * @throw _simdjson_error if there was an error.
    */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
+
   _simdjson_inline T& value() & noexcept(false);
 
   /**
@@ -15626,6 +16803,10 @@ struct implementation__simdjson_result_base {
    * the error() method returns a value that evaluates to false.
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
+
+  using value_type = T;
+  using error_type = error_code;
+
 protected:
   /** users should never directly access first and second. **/
   T first{}; /** Users should never directly access 'first'. **/
@@ -15808,7 +16989,12 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
   // with a returned value of type value128 with a "low component" corresponding to the
   // 64-bit least significant bits of the product and with a "high component" corresponding
   // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+  _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index]);
+#else
   _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index]);
+#endif
+
   // Both i and power_of_five_128[index] have their most significant bit set to 1 which
   // implies that the either the most or the second most significant bit of the product
   // is 1. We pack values in this manner for efficiency reasons: it maximizes the use
@@ -15841,7 +17027,11 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
     // with a returned value of type value128 with a "low component" corresponding to the
     // 64-bit least significant bits of the product and with a "high component" corresponding
     // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+    _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index + 1]);
+#else
     _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index + 1]);
+#endif
     firstproduct.low += secondproduct.high;
     if(secondproduct.high > firstproduct.low) { firstproduct.high++; }
     // As it has been proven by Noble Mushtak and Daniel Lemire in "Fast Number Parsing Without
@@ -16002,7 +17192,7 @@ _simdjson_inline bool is_digit(const uint8_t c) {
   return static_cast<uint8_t>(c - '0') <= 9;
 }
 
-_simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
   // we continue with the fiction that we have an integer. If the
   // floating point number is representable as x * 10^z for some integer
   // z that fits in 53 bits, then we will be able to convert back the
@@ -16030,7 +17220,7 @@ _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const
   return SUCCESS;
 }
 
-_simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
   // Exp Sign: -123.456e[-]78
   bool neg_exp = ('-' == *p);
   if (neg_exp || '+' == *p) { p++; } // Skip + as well
@@ -16119,7 +17309,7 @@ static error_code slow_float_parsing(_simdjson_unused const uint8_t * src, doubl
 
 /** @private */
 template<typename W>
-_simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
   // If we frequently had to deal with long strings of digits,
   // we could extend our code by using a 128-bit integer instead
   // of a 64-bit integer. However, this is uncommon in practice.
@@ -16182,13 +17372,13 @@ _simdjson_inline error_code write_float(const uint8_t *const src, bool negative,
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
 
 // for performance analysis, it is sometimes  useful to skip parsing
 #ifdef _SIMDJSON_SKIPNUMBERPARSING
 
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
   writer.append_s64(0);        // always write zero
   return SUCCESS;              // always succeeds
 }
@@ -16214,7 +17404,7 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   //
   // Check for minus sign
   //
@@ -16288,7 +17478,16 @@ _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   if (i > uint64_t(INT64_MAX)) {
     WRITE_UNSIGNED(i, src, writer);
   } else {
-    WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+    if(i == 0 && negative) {
+      // We have to write -0.0 instead of 0
+      WRITE_DOUBLE(-0.0, src, writer);
+    } else {
+      WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+    }
+#else
+  WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#endif
   }
   if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return INVALID_NUMBER(src); }
   return SUCCESS;
@@ -16749,6 +17948,12 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
       if (_simdjson_unlikely(digit_count == 19 && memcmp(src, smaller_big_integer, 19) > 0)) {
         return number_type::big_integer;
       }
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+      if(digit_count == 1 && src[0] == '0') {
+        // We have to write -0.0 instead of 0
+        return number_type::floating_point_number;
+      }
+#endif
       return number_type::signed_integer;
     }
     // Let us check if we have a big integer (>=2**64).
@@ -16983,11 +18188,40 @@ _simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_resul
 }
 
 template<typename T>
-_simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
+_simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_warn_unused _simdjson_inline bool implementation__simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+template<typename T>
+_simdjson_inline T& implementation__simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& implementation__simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<implementation__simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* implementation__simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* implementation__simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& implementation__simdjson_result_base<T>::value() & noexcept(false) {
@@ -17092,13 +18326,14 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept ;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace haswell
@@ -17131,10 +18366,10 @@ namespace haswell {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace haswell
@@ -17379,22 +18614,22 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_HASWELL_NUMBERPARSING_DEFS_H
 /* end file _simdjson/haswell/numberparsing_defs.h */
-/* including _simdjson/haswell/simd.h: #include "_simdjson/haswell/simd.h" */
-/* begin file _simdjson/haswell/simd.h */
-#ifndef _SIMDJSON_HASWELL_SIMD_H
-#define _SIMDJSON_HASWELL_SIMD_H
+/* including _simdjson/haswell/_simd.h: #include "_simdjson/haswell/_simd.h" */
+/* begin file _simdjson/haswell/_simd.h */
+#ifndef _SIMDJSON_HASWELL__SIMD_H
+#define _SIMDJSON_HASWELL__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/intrinsics.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace haswell {
 namespace {
-namespace simd {
+namespace _simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename Child>
@@ -17404,10 +18639,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m256i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m256i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m256i&() const { return this->value; }
     _simdjson_inline operator __m256i&() { return this->value; }
 
@@ -17423,54 +18658,54 @@ namespace simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
     typedef uint32_t bitmask_t;
     typedef uint64_t bitmask2_t;
 
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m256i _value) : base<simd8<T>>(_value) {}
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m256i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_really_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return _mm256_cmpeq_epi8(lhs, rhs); }
+    friend _simdjson_really_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return _mm256_cmpeq_epi8(lhs, rhs); }
 
     static const int SIZE = sizeof(base<T>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return _mm256_alignr_epi8(*this, _mm256_permute2x128_si256(prev_chunk, *this, 0x21), 16 - N);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return _mm256_set1_epi8(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return _mm256_set1_epi8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m256i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const { return _mm256_movemask_epi8(*this); }
     _simdjson_inline bool any() const { return !_mm256_testz_si256(*this, *this); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return _mm256_set1_epi8(_value); }
-    static _simdjson_inline simd8<T> zero() { return _mm256_setzero_si256(); }
-    static _simdjson_inline simd8<T> load(const T values[32]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return _mm256_set1_epi8(_value); }
+    static _simdjson_inline _simd8<T> zero() { return _mm256_setzero_si256(); }
+    static _simdjson_inline _simd8<T> load(const T values[32]) {
       return _mm256_loadu_si256(reinterpret_cast<const __m256i *>(values));
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -17485,17 +18720,17 @@ namespace simd {
     _simdjson_inline void store(T dst[32]) const { return _mm256_storeu_si256(reinterpret_cast<__m256i *>(dst), *this); }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return _mm256_add_epi8(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return _mm256_sub_epi8(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return _mm256_add_epi8(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return _mm256_sub_epi8(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return _mm256_shuffle_epi8(lookup_table, *this);
     }
 
@@ -17504,7 +18739,7 @@ namespace simd {
     // Only the first 32 - count_ones(mask) bytes of the result are significant but 32 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint32_t mask) would be
+    // signature _simd8<L> compress(uint32_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint32_t mask, L * output) const {
@@ -17542,7 +18777,7 @@ namespace simd {
       __m256i almostthere =  _mm256_shuffle_epi8(pruned, compactmask);
       // We just need to write out the result.
       // This is the tricky bit that is hard to do
-      // if we want to return a SIMD register, since there
+      // if we want to return a _SIMD register, since there
       // is no single-instruction approach to recombine
       // the two 128-bit lanes with an offset.
       __m128i v128;
@@ -17553,12 +18788,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -17569,31 +18804,31 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m256i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t values[32]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t values[32]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15,
       int8_t v16, int8_t v17, int8_t v18, int8_t v19, int8_t v20, int8_t v21, int8_t v22, int8_t v23,
       int8_t v24, int8_t v25, int8_t v26, int8_t v27, int8_t v28, int8_t v29, int8_t v30, int8_t v31
-    ) : simd8(_mm256_setr_epi8(
+    ) : _simd8(_mm256_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,
       v24,v25,v26,v27,v28,v29,v30,v31
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -17602,39 +18837,39 @@ namespace simd {
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return _mm256_max_epi8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return _mm256_min_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return _mm256_cmpgt_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return _mm256_cmpgt_epi8(other, *this); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return _mm256_max_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return _mm256_min_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return _mm256_cmpgt_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return _mm256_cmpgt_epi8(other, *this); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m256i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[32]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[32]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15,
       uint8_t v16, uint8_t v17, uint8_t v18, uint8_t v19, uint8_t v20, uint8_t v21, uint8_t v22, uint8_t v23,
       uint8_t v24, uint8_t v25, uint8_t v26, uint8_t v27, uint8_t v28, uint8_t v29, uint8_t v30, uint8_t v31
-    ) : simd8(_mm256_setr_epi8(
+    ) : _simd8(_mm256_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,
       v24,v25,v26,v27,v28,v29,v30,v31
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -17643,35 +18878,35 @@ namespace simd {
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return _mm256_adds_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return _mm256_subs_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return _mm256_adds_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return _mm256_subs_epu8(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return _mm256_max_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return _mm256_min_epu8(other, *this); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return _mm256_max_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return _mm256_min_epu8(other, *this); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const { return _mm256_movemask_epi8(*this) == 0; }
     _simdjson_inline bool bits_not_set_anywhere() const { return _mm256_testz_si256(*this, *this); }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return _mm256_testz_si256(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const { return _mm256_testz_si256(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm256_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(_mm256_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm256_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(_mm256_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
     // Get one of the bits and make a bitmask out of it.
     // e.g. value.get_bit<7>() gets the high bit
     template<int N>
@@ -17679,17 +18914,17 @@ namespace simd {
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 2, "Haswell kernel should use two registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1) : chunks{chunk0, chunk1} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+32)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1) : chunks{chunk0, chunk1} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+32)} {}
 
     _simdjson_inline uint64_t compress(uint64_t mask, T * output) const {
       uint32_t mask1 = uint32_t(mask);
@@ -17700,8 +18935,8 @@ namespace simd {
     }
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
     }
 
     _simdjson_inline uint64_t to_bitmask() const {
@@ -17710,50 +18945,50 @@ namespace simd {
       return r_lo | (r_hi << 32);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return this->chunks[0] | this->chunks[1];
     }
 
-    _simdjson_inline simd8x64<T> bit_or(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return simd8x64<T>(
+    _simdjson_inline _simd8x64<T> bit_or(const T m) const {
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return _simd8x64<T>(
         this->chunks[0] | mask,
         this->chunks[1] | mask
       );
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1]
       ).to_bitmask();
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 
 } // unnamed namespace
 } // namespace haswell
 } // namespace _simdjson
 
-#endif // _SIMDJSON_HASWELL_SIMD_H
-/* end file _simdjson/haswell/simd.h */
+#endif // _SIMDJSON_HASWELL__SIMD_H
+/* end file _simdjson/haswell/_simd.h */
 /* including _simdjson/haswell/stringparsing_defs.h: #include "_simdjson/haswell/stringparsing_defs.h" */
 /* begin file _simdjson/haswell/stringparsing_defs.h */
 #ifndef _SIMDJSON_HASWELL_STRINGPARSING_DEFS_H
@@ -17761,7 +18996,7 @@ namespace simd {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/haswell/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/haswell/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/haswell/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -17769,13 +19004,13 @@ namespace _simdjson {
 namespace haswell {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return ((quote_bits - 1) & bs_bits) != 0; }
@@ -17790,12 +19025,37 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 15 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v(src);
+  _simd8<uint8_t> v(src);
   // store to dest unconditionally - we can overwrite the bits we don't like later
   v.store(dst);
   return {
       static_cast<uint32_t>((v == '\\').to_bitmask()),     // bs_bits
       static_cast<uint32_t>((v == '"').to_bitmask()), // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 32;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    uint64_t((is_backslash | is_quote | is_control).to_bitmask())
   };
 }
 
@@ -17849,8 +19109,8 @@ namespace _simdjson {
 namespace haswell {
 namespace {
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3);
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input);
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3);
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input);
 
 } // unnamed namespace
 } // namespace haswell
@@ -17872,7 +19132,7 @@ namespace haswell {
 namespace {
 
 struct json_character_block {
-  static _simdjson_inline json_character_block classify(const simd::simd8x64<uint8_t>& in);
+  static _simdjson_inline json_character_block classify(const _simd::_simd8x64<uint8_t>& in);
 
   _simdjson_inline uint64_t whitespace() const noexcept { return _whitespace; }
   _simdjson_inline uint64_t op() const noexcept { return _op; }
@@ -17974,38 +19234,38 @@ private:
 
 // Routines to print masks and text for debugging bitmask operations
 _simdjson_unused static char * format_input_text_64(const uint8_t *text) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     buf[i] = int8_t(text[i]) < ' ' ? '_' : int8_t(text[i]);
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 // Routines to print masks and text for debugging bitmask operations
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] < ' ') { buf[i] = '_'; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in, uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in, uint64_t mask) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] <= ' ') { buf[i] = '_'; }
     if (!(mask & (size_t(1) << i))) { buf[i] = ' '; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 _simdjson_unused static char * format_mask(uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   for (size_t i=0; i<64; i++) {
     buf[i] = (mask & (size_t(1) << i)) ? 'X' : ' ';
   }
@@ -18247,7 +19507,7 @@ struct json_string_block {
 // Scans blocks for string characters, storing the state necessary to do so
 class json_string_scanner {
 public:
-  _simdjson_really_inline json_string_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_really_inline json_string_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
   _simdjson_really_inline error_code finish();
 
@@ -18266,7 +19526,7 @@ private:
 //
 // Backslash sequences outside of quotes will be detected in stage 2.
 //
-_simdjson_really_inline json_string_block json_string_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_really_inline json_string_block json_string_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   const uint64_t backslash = in.eq('\\');
   const uint64_t escaped = escape_scanner.next(backslash).escaped;
   const uint64_t quote = in.eq('"') & ~escaped;
@@ -18320,9 +19580,9 @@ namespace haswell {
 namespace {
 namespace utf8_validation {
 
-using namespace simd;
+using namespace _simd;
 
-  _simdjson_inline simd8<uint8_t> check_special_cases(const simd8<uint8_t> input, const simd8<uint8_t> prev1) {
+  _simdjson_inline _simd8<uint8_t> check_special_cases(const _simd8<uint8_t> input, const _simd8<uint8_t> prev1) {
 // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
 // Bit 1 = Too Long (ASCII followed by continuation)
 // Bit 2 = Overlong 3-byte
@@ -18350,7 +19610,7 @@ using namespace simd;
                                                 // 11111___ 1000____
     constexpr const uint8_t OVERLONG_4  = 1<<6; // 11110000 1000____
 
-    const simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
       // 0_______ ________ <ASCII in byte 1>
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
@@ -18366,7 +19626,7 @@ using namespace simd;
       TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4
     );
     constexpr const uint8_t CARRY = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-    const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
       // ____0000 ________
       CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
       // ____0001 ________
@@ -18394,7 +19654,7 @@ using namespace simd;
       CARRY | TOO_LARGE | TOO_LARGE_1000,
       CARRY | TOO_LARGE | TOO_LARGE_1000
     );
-    const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
       // ________ 0_______ <ASCII in byte 2>
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -18412,12 +19672,12 @@ using namespace simd;
     );
     return (byte_1_high & byte_1_low & byte_2_high);
   }
-  _simdjson_inline simd8<uint8_t> check_multibyte_lengths(const simd8<uint8_t> input,
-      const simd8<uint8_t> prev_input, const simd8<uint8_t> sc) {
-    simd8<uint8_t> prev2 = input.prev<2>(prev_input);
-    simd8<uint8_t> prev3 = input.prev<3>(prev_input);
-    simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
-    simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
+  _simdjson_inline _simd8<uint8_t> check_multibyte_lengths(const _simd8<uint8_t> input,
+      const _simd8<uint8_t> prev_input, const _simd8<uint8_t> sc) {
+    _simd8<uint8_t> prev2 = input.prev<2>(prev_input);
+    _simd8<uint8_t> prev3 = input.prev<3>(prev_input);
+    _simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
+    _simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
     return must23_80 ^ sc;
   }
 
@@ -18425,7 +19685,7 @@ using namespace simd;
   // Return nonzero if there are incomplete multibyte characters at the end of the block:
   // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
   //
-  _simdjson_inline simd8<uint8_t> is_incomplete(const simd8<uint8_t> input) {
+  _simdjson_inline _simd8<uint8_t> is_incomplete(const _simd8<uint8_t> input) {
     // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
     // ... 1111____ 111_____ 11______
 #if _SIMDJSON_IMPLEMENTATION_ICELAKE
@@ -18447,26 +19707,26 @@ using namespace simd;
       255, 255, 255, 255, 255, 0xf0u-1, 0xe0u-1, 0xc0u-1
     };
 #endif
-    const simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(simd8<uint8_t>)]);
+    const _simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(_simd8<uint8_t>)]);
     return input.gt_bits(max_value);
   }
 
   struct utf8_checker {
     // If this is nonzero, there has been a UTF-8 error.
-    simd8<uint8_t> error;
+    _simd8<uint8_t> error;
     // The last input we received
-    simd8<uint8_t> prev_input_block;
+    _simd8<uint8_t> prev_input_block;
     // Whether the last input we received was incomplete (used for ASCII fast path)
-    simd8<uint8_t> prev_incomplete;
+    _simd8<uint8_t> prev_incomplete;
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    _simdjson_inline void check_utf8_bytes(const simd8<uint8_t> input, const simd8<uint8_t> prev_input) {
+    _simdjson_inline void check_utf8_bytes(const _simd8<uint8_t> input, const _simd8<uint8_t> prev_input) {
       // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
       // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
-      simd8<uint8_t> prev1 = input.prev<1>(prev_input);
-      simd8<uint8_t> sc = check_special_cases(input, prev1);
+      _simd8<uint8_t> prev1 = input.prev<1>(prev_input);
+      _simd8<uint8_t> sc = check_special_cases(input, prev1);
       this->error |= check_multibyte_lengths(input, prev_input, sc);
     }
 
@@ -18479,32 +19739,32 @@ using namespace simd;
       this->error |= this->prev_incomplete;
     }
 
-    _simdjson_inline void check_next_input(const simd8x64<uint8_t>& input) {
+    _simdjson_inline void check_next_input(const _simd8x64<uint8_t>& input) {
       if(_simdjson_likely(is_ascii(input))) {
         this->error |= this->prev_incomplete;
       } else {
         // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
-        static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 1)
-                ||(simd8x64<uint8_t>::NUM_CHUNKS == 2)
-                || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
+        static_assert((_simd8x64<uint8_t>::NUM_CHUNKS == 1)
+                ||(_simd8x64<uint8_t>::NUM_CHUNKS == 2)
+                || (_simd8x64<uint8_t>::NUM_CHUNKS == 4),
                 "We support one, two or four chunks per 64-byte block.");
-        _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 1) {
+        _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 1) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 2) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 2) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 4) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 4) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
           this->check_utf8_bytes(input.chunks[2], input.chunks[1]);
           this->check_utf8_bytes(input.chunks[3], input.chunks[2]);
         }
-        this->prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
-        this->prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
+        this->prev_incomplete = is_incomplete(input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1]);
+        this->prev_input_block = input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1];
       }
     }
     // do not forget to call check_eof!
-    _simdjson_inline error_code errors() {
+    _simdjson_warn_unused _simdjson_inline error_code errors() {
       return this->error.any_bits_set_anywhere() ? error_code::UTF8_ERROR : error_code::SUCCESS;
     }
 
@@ -18627,9 +19887,9 @@ private:
 class json_scanner {
 public:
   json_scanner() = default;
-  _simdjson_inline json_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_inline json_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
-  _simdjson_inline error_code finish();
+  _simdjson_warn_unused _simdjson_inline error_code finish();
 
 private:
   // Whether the last character of the previous iteration is part of a scalar token
@@ -18652,7 +19912,7 @@ _simdjson_inline uint64_t follows(const uint64_t match, uint64_t &overflow) {
   return result;
 }
 
-_simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_block json_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   json_string_block strings = string_scanner.next(in);
   // identifies the white-space and the structural characters
   json_character_block characters = json_character_block::classify(in);
@@ -18677,7 +19937,7 @@ _simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in
   );
 }
 
-_simdjson_inline error_code json_scanner::finish() {
+_simdjson_warn_unused _simdjson_inline error_code json_scanner::finish() {
   return string_scanner.finish();
 }
 
@@ -18830,18 +20090,18 @@ private:
   {}
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block_buf, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block);
-  _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block);
+  _simdjson_warn_unused _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
   json_scanner scanner{};
   uint8_t *dst;
 };
 
-_simdjson_inline void json_minifier::next(const simd::simd8x64<uint8_t>& in, const json_block& block) {
+_simdjson_inline void json_minifier::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block) {
   uint64_t mask = block.whitespace();
   dst += in.compress(mask, dst);
 }
 
-_simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
+_simdjson_warn_unused _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
   error_code error = scanner.finish();
   if (error) { dst_len = 0; return error; }
   dst_len = dst - dst_start;
@@ -18850,8 +20110,8 @@ _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &ds
 
 template<>
 _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
-  simd::simd8x64<uint8_t> in_2(block_buf+64);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_2(block_buf+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1);
@@ -18861,7 +20121,7 @@ _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_blo
 
 template<>
 _simdjson_inline void json_minifier::step<64>(const uint8_t *block_buf, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
   json_block block_1 = scanner.next(in_1);
   this->next(block_buf, block_1);
   reader.advance();
@@ -19049,8 +20309,8 @@ private:
   _simdjson_inline json_structural_indexer(uint32_t *structural_indexes);
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx);
-  _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx);
+  _simdjson_warn_unused _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
 
   json_scanner scanner{};
   utf8_checker checker{};
@@ -19128,8 +20388,8 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
 
 template<>
 _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
-  simd::simd8x64<uint8_t> in_2(block+64);
+  _simd::_simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_2(block+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1, reader.block_index());
@@ -19139,13 +20399,13 @@ _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, b
 
 template<>
 _simdjson_inline void json_structural_indexer::step<64>(const uint8_t *block, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_1(block);
   json_block block_1 = scanner.next(in_1);
   this->next(in_1, block_1, reader.block_index());
   reader.advance();
 }
 
-_simdjson_inline void json_structural_indexer::next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
+_simdjson_inline void json_structural_indexer::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
   uint64_t unescaped = in.lteq(0x1F);
 #if _SIMDJSON_UTF8VALIDATION
   checker.check_next_input(in);
@@ -19290,13 +20550,13 @@ bool generic_validate_utf8(const uint8_t * input, size_t length) {
     checker c{};
     buf_block_reader<64> reader(input, length);
     while (reader.has_full_block()) {
-      simd::simd8x64<uint8_t> in(reader.full_block());
+      _simd::_simd8x64<uint8_t> in(reader.full_block());
       c.check_next_input(in);
       reader.advance();
     }
     uint8_t block[64]{};
     reader.get_remainder(block);
-    simd::simd8x64<uint8_t> in(block);
+    _simd::_simd8x64<uint8_t> in(block);
     c.check_next_input(in);
     reader.advance();
     c.check_eof();
@@ -19902,6 +21162,7 @@ _simdjson_warn_unused _simdjson_inline error_code json_iterator::visit_primitive
 /* end file generic/stage2/json_iterator.h for haswell */
 /* including generic/stage2/stringparsing.h for haswell: #include <generic/stage2/stringparsing.h> */
 /* begin file generic/stage2/stringparsing.h for haswell */
+#include <cstdint>
 #ifndef _SIMDJSON_SRC_GENERIC_STAGE2_STRINGPARSING_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
@@ -20054,7 +21315,8 @@ _simdjson_inline bool handle_unicode_codepoint_wobbly(const uint8_t **src_ptr,
 _simdjson_warn_unused _simdjson_inline uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) {
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -20099,7 +21361,8 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
   // It is not ideal that this function is nearly identical to parse_string.
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -20141,6 +21404,7 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
 }
 
 } // namespace stringparsing
+
 } // unnamed namespace
 } // namespace haswell
 } // namespace _simdjson
@@ -20529,27 +21793,24 @@ _simdjson_warn_unused error_code implementation::create_dom_parser_implementatio
   std::unique_ptr<internal::dom_parser_implementation>& dst
 ) const noexcept {
   dst.reset( new (std::nothrow) dom_parser_implementation() );
-
   if (!dst) { return MEMALLOC; }
-  
   if (auto err = dst->set_capacity(capacity))
     return err;
   if (auto err = dst->set_max_depth(max_depth))
     return err;
-
   return SUCCESS;
 }
 
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // This identifies structural characters (comma, colon, braces, brackets),
 // and ASCII white-space ('\r','\n','\t',' ').
-_simdjson_inline json_character_block json_character_block::classify(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_character_block json_character_block::classify(const _simd::_simd8x64<uint8_t>& in) {
   // These lookups rely on the fact that anything < 127 will match the lower 4 bits, which is why
   // we can't use the generic lookup_16.
-  const auto whitespace_table = simd8<uint8_t>::repeat_16(' ', 100, 100, 100, 17, 100, 113, 2, 100, '\t', '\n', 112, 100, '\r', 100, 100);
+  const auto whitespace_table = _simd8<uint8_t>::repeat_16(' ', 100, 100, 100, 17, 100, 113, 2, 100, '\t', '\n', 112, 100, '\r', 100, 100);
 
   // The 6 operators (:,[]{}) have these values:
   //
@@ -20561,7 +21822,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   // } 7D
   //
   // If you use | 0x20 to turn [ and ] into { and }, the lower 4 bits of each character is unique.
-  // We exploit this, using a simd 4-bit lookup to tell us which character match against, and then
+  // We exploit this, using a _simd 4-bit lookup to tell us which character match against, and then
   // match it (against | 0x20).
   //
   // To prevent recognizing other characters, everything else gets compared with 0, which cannot
@@ -20570,7 +21831,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   // NOTE: Due to the | 0x20, this ALSO treats <FF> and <SUB> (control characters 0C and 1A) like ,
   // and :. This gets caught in stage 2, which checks the actual character to ensure the right
   // operators are in the right places.
-  const auto op_table = simd8<uint8_t>::repeat_16(
+  const auto op_table = _simd8<uint8_t>::repeat_16(
     0, 0, 0, 0,
     0, 0, 0, 0,
     0, 0, ':', '{', // : = 3A, [ = 5B, { = 7B
@@ -20587,7 +21848,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
     _mm256_shuffle_epi8(whitespace_table, in.chunks[1])
   });
   // Turn [ and ] into { and }
-  const simd8x64<uint8_t> curlified{
+  const _simd8x64<uint8_t> curlified{
     in.chunks[0] | 0x20,
     in.chunks[1] | 0x20
   };
@@ -20599,21 +21860,21 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   return { whitespace, op };
 }
 
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input) {
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input) {
   return input.reduce_or().is_ascii();
 }
 
-_simdjson_unused _simdjson_inline simd8<bool> must_be_continuation(const simd8<uint8_t> prev1, const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-  simd8<uint8_t> is_second_byte = prev1.saturating_sub(0xc0u-1); // Only 11______ will be > 0
-  simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-1); // Only 111_____ will be > 0
-  simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-1); // Only 1111____ will be > 0
+_simdjson_unused _simdjson_inline _simd8<bool> must_be_continuation(const _simd8<uint8_t> prev1, const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+  _simd8<uint8_t> is_second_byte = prev1.saturating_sub(0xc0u-1); // Only 11______ will be > 0
+  _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-1); // Only 111_____ will be > 0
+  _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-1); // Only 1111____ will be > 0
   // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
-  return simd8<int8_t>(is_second_byte | is_third_byte | is_fourth_byte) > int8_t(0);
+  return _simd8<int8_t>(is_second_byte | is_third_byte | is_fourth_byte) > int8_t(0);
 }
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-  simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
-  simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+  _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
+  _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
   return is_third_byte | is_fourth_byte;
 }
 
@@ -20644,25 +21905,26 @@ _simdjson_warn_unused error_code dom_parser_implementation::stage1(const uint8_t
 _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t len) const noexcept {
   return haswell::stage1::generic_validate_utf8(buf,len);
 }
+
 _simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool replacement_char) const noexcept {
-  return haswell::stringparsing::parse_string(src, dst, replacement_char);
+    return haswell::stringparsing::parse_string(src, dst, replacement_char);
 }
 _simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return haswell::atomparsing::is_valid_true_atom(src, len);
+    return haswell::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return haswell::atomparsing::is_valid_false_atom(src, len);
+    return haswell::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return haswell::atomparsing::is_valid_null_atom(src, len);
+    return haswell::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return haswell::numberparsing::parse_number(src, writer);
+    return haswell::numberparsing::parse_number(src, writer);
 }
 _simdjson_warn_unused error_code dom_parser_implementation::stage2(dom::document &_doc) noexcept {
   return stage2::tape_builder::parse_document<false>(*this, _doc);
@@ -20682,28 +21944,29 @@ _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_wobbly_string(co
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return haswell::atomparsing::is_valid_true_atom(src, len);
+    return haswell::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return haswell::atomparsing::is_valid_false_atom(src, len);
+    return haswell::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return haswell::atomparsing::is_valid_null_atom(src, len);
+    return haswell::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return haswell::numberparsing::parse_number(src, writer);
+    return haswell::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse(const uint8_t* _buf, size_t _len, dom::document& _doc, bool all) noexcept {
-  auto error = stage1(_buf, _len, stage1_mode::regular);
-  if (error) { return error; } if (!all) { return error_code(); }
-  return stage2(_doc);
+    auto error = stage1(_buf, _len, stage1_mode::regular);
+    if (error) { return error; } if (!all) { return error_code(); }
+    return stage2(_doc);
 }
+
 
 } // namespace haswell
 } // namespace _simdjson
@@ -20941,16 +22204,16 @@ _simdjson_inline uint64_t prefix_xor(const uint64_t bitmask) {
 
 #endif // _SIMDJSON_ICELAKE_BITMASK_H
 /* end file _simdjson/icelake/bitmask.h */
-/* including _simdjson/icelake/simd.h: #include "_simdjson/icelake/simd.h" */
-/* begin file _simdjson/icelake/simd.h */
-#ifndef _SIMDJSON_ICELAKE_SIMD_H
-#define _SIMDJSON_ICELAKE_SIMD_H
+/* including _simdjson/icelake/_simd.h: #include "_simdjson/icelake/_simd.h" */
+/* begin file _simdjson/icelake/_simd.h */
+#ifndef _SIMDJSON_ICELAKE__SIMD_H
+#define _SIMDJSON_ICELAKE__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/intrinsics.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -20980,7 +22243,7 @@ inline __m512i _mm512_set_epi8(uint8_t a0, uint8_t a1, uint8_t a2, uint8_t a3, u
 namespace _simdjson {
 namespace icelake {
 namespace {
-namespace simd {
+namespace _simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename Child>
@@ -20990,10 +22253,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m512i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m512i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m512i&() const { return this->value; }
     _simdjson_inline operator __m512i&() { return this->value; }
 
@@ -21009,56 +22272,55 @@ namespace simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
     typedef uint32_t bitmask_t;
     typedef uint64_t bitmask2_t;
 
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m512i _value) : base<simd8<T>>(_value) {}
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m512i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_really_inline uint64_t operator==(const simd8<T> lhs, const simd8<T> rhs) {
+    friend _simdjson_really_inline uint64_t operator==(const _simd8<T> lhs, const _simd8<T> rhs) {
       return _mm512_cmpeq_epi8_mask(lhs, rhs);
     }
-
     static const int SIZE = sizeof(base<T>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
      // workaround for compilers unable to figure out that 16 - N is a constant (GCC 8)
       constexpr int shift = 16 - N;
       return _mm512_alignr_epi8(*this, _mm512_permutex2var_epi64(prev_chunk, _mm512_set_epi64(13, 12, 11, 10, 9, 8, 7, 6), *this), shift);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return _mm512_set1_epi8(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return _mm512_set1_epi8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m512i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m512i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
     _simdjson_inline bool any() const { return !!_mm512_test_epi8_mask (*this, *this); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return _mm512_set1_epi8(_value); }
-    static _simdjson_inline simd8<T> zero() { return _mm512_setzero_si512(); }
-    static _simdjson_inline simd8<T> load(const T values[64]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return _mm512_set1_epi8(_value); }
+    static _simdjson_inline _simd8<T> zero() { return _mm512_setzero_si512(); }
+    static _simdjson_inline _simd8<T> load(const T values[64]) {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i *>(values));
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -21077,17 +22339,17 @@ namespace simd {
     _simdjson_inline void store(T dst[64]) const { return _mm512_storeu_si512(reinterpret_cast<__m512i *>(dst), *this); }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return _mm512_add_epi8(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return _mm512_sub_epi8(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return _mm512_add_epi8(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return _mm512_sub_epi8(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return _mm512_shuffle_epi8(lookup_table, *this);
     }
 
@@ -21096,7 +22358,7 @@ namespace simd {
     // Only the first 64 - count_ones(mask) bytes of the result are significant but 64 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint32_t mask) would be
+    // signature _simd8<L> compress(uint32_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint64_t mask, L * output) const {
@@ -21108,12 +22370,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -21124,15 +22386,15 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m512i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m512i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t values[64]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t values[64]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15,
       int8_t v16, int8_t v17, int8_t v18, int8_t v19, int8_t v20, int8_t v21, int8_t v22, int8_t v23,
@@ -21141,7 +22403,7 @@ namespace simd {
       int8_t v40, int8_t v41, int8_t v42, int8_t v43, int8_t v44, int8_t v45, int8_t v46, int8_t v47,
       int8_t v48, int8_t v49, int8_t v50, int8_t v51, int8_t v52, int8_t v53, int8_t v54, int8_t v55,
       int8_t v56, int8_t v57, int8_t v58, int8_t v59, int8_t v60, int8_t v61, int8_t v62, int8_t v63
-    ) : simd8(_mm512_set_epi8(
+    ) : _simd8(_mm512_set_epi8(
       v63, v62, v61, v60, v59, v58, v57, v56,
       v55, v54, v53, v52, v51, v50, v49, v48,
       v47, v46, v45, v44, v43, v42, v41, v40,
@@ -21153,11 +22415,11 @@ namespace simd {
     )) {}
 
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -21170,24 +22432,24 @@ namespace simd {
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return _mm512_max_epi8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return _mm512_min_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return _mm512_max_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return _mm512_min_epi8(*this, other); }
 
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return _mm512_maskz_abs_epi8(_mm512_cmpgt_epi8_mask(*this, other),_mm512_set1_epi8(uint8_t(0x80))); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return _mm512_maskz_abs_epi8(_mm512_cmpgt_epi8_mask(other, *this),_mm512_set1_epi8(uint8_t(0x80))); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return _mm512_maskz_abs_epi8(_mm512_cmpgt_epi8_mask(*this, other),_mm512_set1_epi8(uint8_t(0x80))); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return _mm512_maskz_abs_epi8(_mm512_cmpgt_epi8_mask(other, *this),_mm512_set1_epi8(uint8_t(0x80))); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m512i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m512i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[64]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[64]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15,
       uint8_t v16, uint8_t v17, uint8_t v18, uint8_t v19, uint8_t v20, uint8_t v21, uint8_t v22, uint8_t v23,
@@ -21196,7 +22458,7 @@ namespace simd {
       uint8_t v40, uint8_t v41, uint8_t v42, uint8_t v43, uint8_t v44, uint8_t v45, uint8_t v46, uint8_t v47,
       uint8_t v48, uint8_t v49, uint8_t v50, uint8_t v51, uint8_t v52, uint8_t v53, uint8_t v54, uint8_t v55,
       uint8_t v56, uint8_t v57, uint8_t v58, uint8_t v59, uint8_t v60, uint8_t v61, uint8_t v62, uint8_t v63
-    ) : simd8(_mm512_set_epi8(
+    ) : _simd8(_mm512_set_epi8(
       v63, v62, v61, v60, v59, v58, v57, v56,
       v55, v54, v53, v52, v51, v50, v49, v48,
       v47, v46, v45, v44, v43, v42, v41, v40,
@@ -21208,11 +22470,11 @@ namespace simd {
     )) {}
 
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -21225,38 +22487,38 @@ namespace simd {
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return _mm512_adds_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return _mm512_subs_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return _mm512_adds_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return _mm512_subs_epu8(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return _mm512_max_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return _mm512_min_epu8(other, *this); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return _mm512_max_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return _mm512_min_epu8(other, *this); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline uint64_t operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline uint64_t operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline uint64_t operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline uint64_t operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return _mm512_mask_blend_epi8(*this == uint8_t(0), _mm512_set1_epi8(0), _mm512_set1_epi8(-1)); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return _mm512_mask_blend_epi8(*this == uint8_t(0), _mm512_set1_epi8(0), _mm512_set1_epi8(-1)); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
 
     _simdjson_inline bool is_ascii() const { return _mm512_movepi8_mask(*this) == 0; }
     _simdjson_inline bool bits_not_set_anywhere() const {
       return !_mm512_test_epi8_mask(*this, *this);
     }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return !_mm512_test_epi8_mask(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const { return !_mm512_test_epi8_mask(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm512_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(_mm512_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm512_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(_mm512_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
     // Get one of the bits and make a bitmask out of it.
     // e.g. value.get_bit<7>() gets the high bit
     template<int N>
@@ -21264,18 +22526,18 @@ namespace simd {
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 1, "Icelake kernel should use one register per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1) : chunks{chunk0, chunk1} {}
-    _simdjson_inline simd8x64(const simd8<T> chunk0) : chunks{chunk0} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1) : chunks{chunk0, chunk1} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0) : chunks{chunk0} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr)} {}
 
     _simdjson_inline uint64_t compress(uint64_t mask, T * output) const {
       this->chunks[0].compress(mask, output);
@@ -21283,43 +22545,43 @@ namespace simd {
     }
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return this->chunks[0];
     }
 
-    _simdjson_inline simd8x64<T> bit_or(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return simd8x64<T>(
+    _simdjson_inline _simd8x64<T> bit_or(const T m) const {
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return _simd8x64<T>(
         this->chunks[0] | mask
       );
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
+      const _simd8<T> mask = _simd8<T>::splat(m);
       return this->chunks[0] == mask;
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
       return this->chunks[0] == other.chunks[0];
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
+      const _simd8<T> mask = _simd8<T>::splat(m);
       return this->chunks[0] <= mask;
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 
 } // unnamed namespace
 } // namespace icelake
 } // namespace _simdjson
 
-#endif // _SIMDJSON_ICELAKE_SIMD_H
-/* end file _simdjson/icelake/simd.h */
+#endif // _SIMDJSON_ICELAKE__SIMD_H
+/* end file _simdjson/icelake/_simd.h */
 /* including _simdjson/icelake/stringparsing_defs.h: #include "_simdjson/icelake/stringparsing_defs.h" */
 /* begin file _simdjson/icelake/stringparsing_defs.h */
 #ifndef _SIMDJSON_ICELAKE_STRINGPARSING_DEFS_H
@@ -21327,7 +22589,7 @@ namespace simd {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/icelake/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/icelake/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -21335,13 +22597,13 @@ namespace _simdjson {
 namespace icelake {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 64;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return ((quote_bits - 1) & bs_bits) != 0; }
@@ -21356,7 +22618,7 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 15 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v(src);
+  _simd8<uint8_t> v(src);
   // store to dest unconditionally - we can overwrite the bits we don't like later
   v.store(dst);
   return {
@@ -21364,6 +22626,35 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
       static_cast<uint64_t>(v == '"'), // quote_bits
   };
 }
+
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 64;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(uint64_t(escape_bits)); }
+
+  __mmask64 escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  __mmask64 is_quote = _mm512_cmpeq_epi8_mask(v, _mm512_set1_epi8('"'));
+  __mmask64 is_backslash = _mm512_cmpeq_epi8_mask(v, _mm512_set1_epi8('\\'));
+  __mmask64 is_control = _mm512_cmplt_epi8_mask(v, _mm512_set1_epi8(32));
+  return {
+    (is_backslash | is_quote | is_control)
+  };
+}
+
+
+
 
 } // unnamed namespace
 } // namespace icelake
@@ -21718,21 +23009,23 @@ public:
   inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
   dom_parser_implementation(const dom_parser_implementation &) = delete;
   dom_parser_implementation &operator=(const dom_parser_implementation &) = delete;
-  virtual _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
 
-  virtual _simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
-  virtual  _simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
+  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
+  _simdjson_warn_unused error_code stage1(const uint8_t* buf, size_t len, stage1_mode partial) noexcept final;
+  _simdjson_warn_unused error_code stage2(dom::document& doc) noexcept final;
+  _simdjson_warn_unused error_code stage2_next(dom::document& doc) noexcept final;
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept final;
+  _simdjson_warn_unused uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept final;
+
 
   _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
   _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
-  
-  virtual inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
-  virtual inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
+  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
+  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
 private:
   _simdjson_inline _simdjson_warn_unused error_code set_capacity_stage1(size_t capacity);
 
@@ -21848,12 +23141,17 @@ struct implementation__simdjson_result_base {
    *
    * @param value The variable to assign the value to. May not be set if there is an error.
    */
-  _simdjson_inline error_code get(T &value) && noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
    * The error.
    */
-  _simdjson_inline error_code error() const noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code error() const noexcept;
+
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_warn_unused _simdjson_inline bool has_value() const noexcept;
 
 #if _SIMDJSON_EXCEPTIONS
 
@@ -21862,6 +23160,16 @@ struct implementation__simdjson_result_base {
    *
    * @throw _simdjson_error if there was an error.
    */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
+
   _simdjson_inline T& value() & noexcept(false);
 
   /**
@@ -21903,6 +23211,10 @@ struct implementation__simdjson_result_base {
    * the error() method returns a value that evaluates to false.
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
+
+  using value_type = T;
+  using error_type = error_code;
+
 protected:
   /** users should never directly access first and second. **/
   T first{}; /** Users should never directly access 'first'. **/
@@ -22085,7 +23397,12 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
   // with a returned value of type value128 with a "low component" corresponding to the
   // 64-bit least significant bits of the product and with a "high component" corresponding
   // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+  _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index]);
+#else
   _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index]);
+#endif
+
   // Both i and power_of_five_128[index] have their most significant bit set to 1 which
   // implies that the either the most or the second most significant bit of the product
   // is 1. We pack values in this manner for efficiency reasons: it maximizes the use
@@ -22118,7 +23435,11 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
     // with a returned value of type value128 with a "low component" corresponding to the
     // 64-bit least significant bits of the product and with a "high component" corresponding
     // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+    _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index + 1]);
+#else
     _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index + 1]);
+#endif
     firstproduct.low += secondproduct.high;
     if(secondproduct.high > firstproduct.low) { firstproduct.high++; }
     // As it has been proven by Noble Mushtak and Daniel Lemire in "Fast Number Parsing Without
@@ -22279,7 +23600,7 @@ _simdjson_inline bool is_digit(const uint8_t c) {
   return static_cast<uint8_t>(c - '0') <= 9;
 }
 
-_simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
   // we continue with the fiction that we have an integer. If the
   // floating point number is representable as x * 10^z for some integer
   // z that fits in 53 bits, then we will be able to convert back the
@@ -22307,7 +23628,7 @@ _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const
   return SUCCESS;
 }
 
-_simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
   // Exp Sign: -123.456e[-]78
   bool neg_exp = ('-' == *p);
   if (neg_exp || '+' == *p) { p++; } // Skip + as well
@@ -22396,7 +23717,7 @@ static error_code slow_float_parsing(_simdjson_unused const uint8_t * src, doubl
 
 /** @private */
 template<typename W>
-_simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
   // If we frequently had to deal with long strings of digits,
   // we could extend our code by using a 128-bit integer instead
   // of a 64-bit integer. However, this is uncommon in practice.
@@ -22459,13 +23780,13 @@ _simdjson_inline error_code write_float(const uint8_t *const src, bool negative,
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
 
 // for performance analysis, it is sometimes  useful to skip parsing
 #ifdef _SIMDJSON_SKIPNUMBERPARSING
 
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
   writer.append_s64(0);        // always write zero
   return SUCCESS;              // always succeeds
 }
@@ -22491,7 +23812,7 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   //
   // Check for minus sign
   //
@@ -22565,7 +23886,16 @@ _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   if (i > uint64_t(INT64_MAX)) {
     WRITE_UNSIGNED(i, src, writer);
   } else {
-    WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+    if(i == 0 && negative) {
+      // We have to write -0.0 instead of 0
+      WRITE_DOUBLE(-0.0, src, writer);
+    } else {
+      WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+    }
+#else
+  WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#endif
   }
   if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return INVALID_NUMBER(src); }
   return SUCCESS;
@@ -23026,6 +24356,12 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
       if (_simdjson_unlikely(digit_count == 19 && memcmp(src, smaller_big_integer, 19) > 0)) {
         return number_type::big_integer;
       }
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+      if(digit_count == 1 && src[0] == '0') {
+        // We have to write -0.0 instead of 0
+        return number_type::floating_point_number;
+      }
+#endif
       return number_type::signed_integer;
     }
     // Let us check if we have a big integer (>=2**64).
@@ -23260,11 +24596,40 @@ _simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_resul
 }
 
 template<typename T>
-_simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
+_simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_warn_unused _simdjson_inline bool implementation__simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+template<typename T>
+_simdjson_inline T& implementation__simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& implementation__simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<implementation__simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* implementation__simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* implementation__simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& implementation__simdjson_result_base<T>::value() & noexcept(false) {
@@ -23369,14 +24734,13 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
-
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
 
 };
 
@@ -23590,16 +24954,16 @@ _simdjson_inline uint64_t prefix_xor(const uint64_t bitmask) {
 
 #endif // _SIMDJSON_ICELAKE_BITMASK_H
 /* end file _simdjson/icelake/bitmask.h */
-/* including _simdjson/icelake/simd.h: #include "_simdjson/icelake/simd.h" */
-/* begin file _simdjson/icelake/simd.h */
-#ifndef _SIMDJSON_ICELAKE_SIMD_H
-#define _SIMDJSON_ICELAKE_SIMD_H
+/* including _simdjson/icelake/_simd.h: #include "_simdjson/icelake/_simd.h" */
+/* begin file _simdjson/icelake/_simd.h */
+#ifndef _SIMDJSON_ICELAKE__SIMD_H
+#define _SIMDJSON_ICELAKE__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/intrinsics.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -23629,7 +24993,7 @@ inline __m512i _mm512_set_epi8(uint8_t a0, uint8_t a1, uint8_t a2, uint8_t a3, u
 namespace _simdjson {
 namespace icelake {
 namespace {
-namespace simd {
+namespace _simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename Child>
@@ -23639,10 +25003,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m512i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m512i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m512i&() const { return this->value; }
     _simdjson_inline operator __m512i&() { return this->value; }
 
@@ -23658,56 +25022,55 @@ namespace simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
     typedef uint32_t bitmask_t;
     typedef uint64_t bitmask2_t;
 
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m512i _value) : base<simd8<T>>(_value) {}
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m512i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_really_inline uint64_t operator==(const simd8<T> lhs, const simd8<T> rhs) {
+    friend _simdjson_really_inline uint64_t operator==(const _simd8<T> lhs, const _simd8<T> rhs) {
       return _mm512_cmpeq_epi8_mask(lhs, rhs);
     }
-
     static const int SIZE = sizeof(base<T>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
      // workaround for compilers unable to figure out that 16 - N is a constant (GCC 8)
       constexpr int shift = 16 - N;
       return _mm512_alignr_epi8(*this, _mm512_permutex2var_epi64(prev_chunk, _mm512_set_epi64(13, 12, 11, 10, 9, 8, 7, 6), *this), shift);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return _mm512_set1_epi8(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return _mm512_set1_epi8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m512i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m512i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
     _simdjson_inline bool any() const { return !!_mm512_test_epi8_mask (*this, *this); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return _mm512_set1_epi8(_value); }
-    static _simdjson_inline simd8<T> zero() { return _mm512_setzero_si512(); }
-    static _simdjson_inline simd8<T> load(const T values[64]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return _mm512_set1_epi8(_value); }
+    static _simdjson_inline _simd8<T> zero() { return _mm512_setzero_si512(); }
+    static _simdjson_inline _simd8<T> load(const T values[64]) {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i *>(values));
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -23726,17 +25089,17 @@ namespace simd {
     _simdjson_inline void store(T dst[64]) const { return _mm512_storeu_si512(reinterpret_cast<__m512i *>(dst), *this); }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return _mm512_add_epi8(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return _mm512_sub_epi8(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return _mm512_add_epi8(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return _mm512_sub_epi8(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return _mm512_shuffle_epi8(lookup_table, *this);
     }
 
@@ -23745,7 +25108,7 @@ namespace simd {
     // Only the first 64 - count_ones(mask) bytes of the result are significant but 64 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint32_t mask) would be
+    // signature _simd8<L> compress(uint32_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint64_t mask, L * output) const {
@@ -23757,12 +25120,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -23773,15 +25136,15 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m512i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m512i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t values[64]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t values[64]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15,
       int8_t v16, int8_t v17, int8_t v18, int8_t v19, int8_t v20, int8_t v21, int8_t v22, int8_t v23,
@@ -23790,7 +25153,7 @@ namespace simd {
       int8_t v40, int8_t v41, int8_t v42, int8_t v43, int8_t v44, int8_t v45, int8_t v46, int8_t v47,
       int8_t v48, int8_t v49, int8_t v50, int8_t v51, int8_t v52, int8_t v53, int8_t v54, int8_t v55,
       int8_t v56, int8_t v57, int8_t v58, int8_t v59, int8_t v60, int8_t v61, int8_t v62, int8_t v63
-    ) : simd8(_mm512_set_epi8(
+    ) : _simd8(_mm512_set_epi8(
       v63, v62, v61, v60, v59, v58, v57, v56,
       v55, v54, v53, v52, v51, v50, v49, v48,
       v47, v46, v45, v44, v43, v42, v41, v40,
@@ -23802,11 +25165,11 @@ namespace simd {
     )) {}
 
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -23819,24 +25182,24 @@ namespace simd {
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return _mm512_max_epi8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return _mm512_min_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return _mm512_max_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return _mm512_min_epi8(*this, other); }
 
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return _mm512_maskz_abs_epi8(_mm512_cmpgt_epi8_mask(*this, other),_mm512_set1_epi8(uint8_t(0x80))); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return _mm512_maskz_abs_epi8(_mm512_cmpgt_epi8_mask(other, *this),_mm512_set1_epi8(uint8_t(0x80))); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return _mm512_maskz_abs_epi8(_mm512_cmpgt_epi8_mask(*this, other),_mm512_set1_epi8(uint8_t(0x80))); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return _mm512_maskz_abs_epi8(_mm512_cmpgt_epi8_mask(other, *this),_mm512_set1_epi8(uint8_t(0x80))); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m512i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m512i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[64]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[64]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15,
       uint8_t v16, uint8_t v17, uint8_t v18, uint8_t v19, uint8_t v20, uint8_t v21, uint8_t v22, uint8_t v23,
@@ -23845,7 +25208,7 @@ namespace simd {
       uint8_t v40, uint8_t v41, uint8_t v42, uint8_t v43, uint8_t v44, uint8_t v45, uint8_t v46, uint8_t v47,
       uint8_t v48, uint8_t v49, uint8_t v50, uint8_t v51, uint8_t v52, uint8_t v53, uint8_t v54, uint8_t v55,
       uint8_t v56, uint8_t v57, uint8_t v58, uint8_t v59, uint8_t v60, uint8_t v61, uint8_t v62, uint8_t v63
-    ) : simd8(_mm512_set_epi8(
+    ) : _simd8(_mm512_set_epi8(
       v63, v62, v61, v60, v59, v58, v57, v56,
       v55, v54, v53, v52, v51, v50, v49, v48,
       v47, v46, v45, v44, v43, v42, v41, v40,
@@ -23857,11 +25220,11 @@ namespace simd {
     )) {}
 
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -23874,38 +25237,38 @@ namespace simd {
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return _mm512_adds_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return _mm512_subs_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return _mm512_adds_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return _mm512_subs_epu8(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return _mm512_max_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return _mm512_min_epu8(other, *this); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return _mm512_max_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return _mm512_min_epu8(other, *this); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline uint64_t operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline uint64_t operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline uint64_t operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline uint64_t operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return _mm512_mask_blend_epi8(*this == uint8_t(0), _mm512_set1_epi8(0), _mm512_set1_epi8(-1)); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return _mm512_mask_blend_epi8(*this == uint8_t(0), _mm512_set1_epi8(0), _mm512_set1_epi8(-1)); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
 
     _simdjson_inline bool is_ascii() const { return _mm512_movepi8_mask(*this) == 0; }
     _simdjson_inline bool bits_not_set_anywhere() const {
       return !_mm512_test_epi8_mask(*this, *this);
     }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return !_mm512_test_epi8_mask(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const { return !_mm512_test_epi8_mask(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm512_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(_mm512_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm512_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(_mm512_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
     // Get one of the bits and make a bitmask out of it.
     // e.g. value.get_bit<7>() gets the high bit
     template<int N>
@@ -23913,18 +25276,18 @@ namespace simd {
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 1, "Icelake kernel should use one register per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1) : chunks{chunk0, chunk1} {}
-    _simdjson_inline simd8x64(const simd8<T> chunk0) : chunks{chunk0} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1) : chunks{chunk0, chunk1} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0) : chunks{chunk0} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr)} {}
 
     _simdjson_inline uint64_t compress(uint64_t mask, T * output) const {
       this->chunks[0].compress(mask, output);
@@ -23932,43 +25295,43 @@ namespace simd {
     }
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return this->chunks[0];
     }
 
-    _simdjson_inline simd8x64<T> bit_or(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return simd8x64<T>(
+    _simdjson_inline _simd8x64<T> bit_or(const T m) const {
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return _simd8x64<T>(
         this->chunks[0] | mask
       );
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
+      const _simd8<T> mask = _simd8<T>::splat(m);
       return this->chunks[0] == mask;
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
       return this->chunks[0] == other.chunks[0];
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
+      const _simd8<T> mask = _simd8<T>::splat(m);
       return this->chunks[0] <= mask;
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 
 } // unnamed namespace
 } // namespace icelake
 } // namespace _simdjson
 
-#endif // _SIMDJSON_ICELAKE_SIMD_H
-/* end file _simdjson/icelake/simd.h */
+#endif // _SIMDJSON_ICELAKE__SIMD_H
+/* end file _simdjson/icelake/_simd.h */
 /* including _simdjson/icelake/stringparsing_defs.h: #include "_simdjson/icelake/stringparsing_defs.h" */
 /* begin file _simdjson/icelake/stringparsing_defs.h */
 #ifndef _SIMDJSON_ICELAKE_STRINGPARSING_DEFS_H
@@ -23976,7 +25339,7 @@ namespace simd {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/icelake/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/icelake/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/icelake/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -23984,13 +25347,13 @@ namespace _simdjson {
 namespace icelake {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 64;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return ((quote_bits - 1) & bs_bits) != 0; }
@@ -24005,7 +25368,7 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 15 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v(src);
+  _simd8<uint8_t> v(src);
   // store to dest unconditionally - we can overwrite the bits we don't like later
   v.store(dst);
   return {
@@ -24013,6 +25376,35 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
       static_cast<uint64_t>(v == '"'), // quote_bits
   };
 }
+
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 64;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(uint64_t(escape_bits)); }
+
+  __mmask64 escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  __mmask64 is_quote = _mm512_cmpeq_epi8_mask(v, _mm512_set1_epi8('"'));
+  __mmask64 is_backslash = _mm512_cmpeq_epi8_mask(v, _mm512_set1_epi8('\\'));
+  __mmask64 is_control = _mm512_cmplt_epi8_mask(v, _mm512_set1_epi8(32));
+  return {
+    (is_backslash | is_quote | is_control)
+  };
+}
+
+
+
 
 } // unnamed namespace
 } // namespace icelake
@@ -24124,8 +25516,8 @@ namespace _simdjson {
 namespace icelake {
 namespace {
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3);
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input);
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3);
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input);
 
 } // unnamed namespace
 } // namespace icelake
@@ -24147,7 +25539,7 @@ namespace icelake {
 namespace {
 
 struct json_character_block {
-  static _simdjson_inline json_character_block classify(const simd::simd8x64<uint8_t>& in);
+  static _simdjson_inline json_character_block classify(const _simd::_simd8x64<uint8_t>& in);
 
   _simdjson_inline uint64_t whitespace() const noexcept { return _whitespace; }
   _simdjson_inline uint64_t op() const noexcept { return _op; }
@@ -24249,38 +25641,38 @@ private:
 
 // Routines to print masks and text for debugging bitmask operations
 _simdjson_unused static char * format_input_text_64(const uint8_t *text) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     buf[i] = int8_t(text[i]) < ' ' ? '_' : int8_t(text[i]);
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 // Routines to print masks and text for debugging bitmask operations
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] < ' ') { buf[i] = '_'; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in, uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in, uint64_t mask) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] <= ' ') { buf[i] = '_'; }
     if (!(mask & (size_t(1) << i))) { buf[i] = ' '; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 _simdjson_unused static char * format_mask(uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   for (size_t i=0; i<64; i++) {
     buf[i] = (mask & (size_t(1) << i)) ? 'X' : ' ';
   }
@@ -24522,7 +25914,7 @@ struct json_string_block {
 // Scans blocks for string characters, storing the state necessary to do so
 class json_string_scanner {
 public:
-  _simdjson_really_inline json_string_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_really_inline json_string_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
   _simdjson_really_inline error_code finish();
 
@@ -24541,7 +25933,7 @@ private:
 //
 // Backslash sequences outside of quotes will be detected in stage 2.
 //
-_simdjson_really_inline json_string_block json_string_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_really_inline json_string_block json_string_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   const uint64_t backslash = in.eq('\\');
   const uint64_t escaped = escape_scanner.next(backslash).escaped;
   const uint64_t quote = in.eq('"') & ~escaped;
@@ -24595,9 +25987,9 @@ namespace icelake {
 namespace {
 namespace utf8_validation {
 
-using namespace simd;
+using namespace _simd;
 
-  _simdjson_inline simd8<uint8_t> check_special_cases(const simd8<uint8_t> input, const simd8<uint8_t> prev1) {
+  _simdjson_inline _simd8<uint8_t> check_special_cases(const _simd8<uint8_t> input, const _simd8<uint8_t> prev1) {
 // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
 // Bit 1 = Too Long (ASCII followed by continuation)
 // Bit 2 = Overlong 3-byte
@@ -24625,7 +26017,7 @@ using namespace simd;
                                                 // 11111___ 1000____
     constexpr const uint8_t OVERLONG_4  = 1<<6; // 11110000 1000____
 
-    const simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
       // 0_______ ________ <ASCII in byte 1>
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
@@ -24641,7 +26033,7 @@ using namespace simd;
       TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4
     );
     constexpr const uint8_t CARRY = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-    const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
       // ____0000 ________
       CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
       // ____0001 ________
@@ -24669,7 +26061,7 @@ using namespace simd;
       CARRY | TOO_LARGE | TOO_LARGE_1000,
       CARRY | TOO_LARGE | TOO_LARGE_1000
     );
-    const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
       // ________ 0_______ <ASCII in byte 2>
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -24687,12 +26079,12 @@ using namespace simd;
     );
     return (byte_1_high & byte_1_low & byte_2_high);
   }
-  _simdjson_inline simd8<uint8_t> check_multibyte_lengths(const simd8<uint8_t> input,
-      const simd8<uint8_t> prev_input, const simd8<uint8_t> sc) {
-    simd8<uint8_t> prev2 = input.prev<2>(prev_input);
-    simd8<uint8_t> prev3 = input.prev<3>(prev_input);
-    simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
-    simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
+  _simdjson_inline _simd8<uint8_t> check_multibyte_lengths(const _simd8<uint8_t> input,
+      const _simd8<uint8_t> prev_input, const _simd8<uint8_t> sc) {
+    _simd8<uint8_t> prev2 = input.prev<2>(prev_input);
+    _simd8<uint8_t> prev3 = input.prev<3>(prev_input);
+    _simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
+    _simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
     return must23_80 ^ sc;
   }
 
@@ -24700,7 +26092,7 @@ using namespace simd;
   // Return nonzero if there are incomplete multibyte characters at the end of the block:
   // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
   //
-  _simdjson_inline simd8<uint8_t> is_incomplete(const simd8<uint8_t> input) {
+  _simdjson_inline _simd8<uint8_t> is_incomplete(const _simd8<uint8_t> input) {
     // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
     // ... 1111____ 111_____ 11______
 #if _SIMDJSON_IMPLEMENTATION_ICELAKE
@@ -24722,26 +26114,26 @@ using namespace simd;
       255, 255, 255, 255, 255, 0xf0u-1, 0xe0u-1, 0xc0u-1
     };
 #endif
-    const simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(simd8<uint8_t>)]);
+    const _simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(_simd8<uint8_t>)]);
     return input.gt_bits(max_value);
   }
 
   struct utf8_checker {
     // If this is nonzero, there has been a UTF-8 error.
-    simd8<uint8_t> error;
+    _simd8<uint8_t> error;
     // The last input we received
-    simd8<uint8_t> prev_input_block;
+    _simd8<uint8_t> prev_input_block;
     // Whether the last input we received was incomplete (used for ASCII fast path)
-    simd8<uint8_t> prev_incomplete;
+    _simd8<uint8_t> prev_incomplete;
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    _simdjson_inline void check_utf8_bytes(const simd8<uint8_t> input, const simd8<uint8_t> prev_input) {
+    _simdjson_inline void check_utf8_bytes(const _simd8<uint8_t> input, const _simd8<uint8_t> prev_input) {
       // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
       // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
-      simd8<uint8_t> prev1 = input.prev<1>(prev_input);
-      simd8<uint8_t> sc = check_special_cases(input, prev1);
+      _simd8<uint8_t> prev1 = input.prev<1>(prev_input);
+      _simd8<uint8_t> sc = check_special_cases(input, prev1);
       this->error |= check_multibyte_lengths(input, prev_input, sc);
     }
 
@@ -24754,32 +26146,32 @@ using namespace simd;
       this->error |= this->prev_incomplete;
     }
 
-    _simdjson_inline void check_next_input(const simd8x64<uint8_t>& input) {
+    _simdjson_inline void check_next_input(const _simd8x64<uint8_t>& input) {
       if(_simdjson_likely(is_ascii(input))) {
         this->error |= this->prev_incomplete;
       } else {
         // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
-        static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 1)
-                ||(simd8x64<uint8_t>::NUM_CHUNKS == 2)
-                || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
+        static_assert((_simd8x64<uint8_t>::NUM_CHUNKS == 1)
+                ||(_simd8x64<uint8_t>::NUM_CHUNKS == 2)
+                || (_simd8x64<uint8_t>::NUM_CHUNKS == 4),
                 "We support one, two or four chunks per 64-byte block.");
-        _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 1) {
+        _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 1) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 2) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 2) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 4) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 4) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
           this->check_utf8_bytes(input.chunks[2], input.chunks[1]);
           this->check_utf8_bytes(input.chunks[3], input.chunks[2]);
         }
-        this->prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
-        this->prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
+        this->prev_incomplete = is_incomplete(input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1]);
+        this->prev_input_block = input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1];
       }
     }
     // do not forget to call check_eof!
-    _simdjson_inline error_code errors() {
+    _simdjson_warn_unused _simdjson_inline error_code errors() {
       return this->error.any_bits_set_anywhere() ? error_code::UTF8_ERROR : error_code::SUCCESS;
     }
 
@@ -24902,9 +26294,9 @@ private:
 class json_scanner {
 public:
   json_scanner() = default;
-  _simdjson_inline json_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_inline json_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
-  _simdjson_inline error_code finish();
+  _simdjson_warn_unused _simdjson_inline error_code finish();
 
 private:
   // Whether the last character of the previous iteration is part of a scalar token
@@ -24927,7 +26319,7 @@ _simdjson_inline uint64_t follows(const uint64_t match, uint64_t &overflow) {
   return result;
 }
 
-_simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_block json_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   json_string_block strings = string_scanner.next(in);
   // identifies the white-space and the structural characters
   json_character_block characters = json_character_block::classify(in);
@@ -24952,7 +26344,7 @@ _simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in
   );
 }
 
-_simdjson_inline error_code json_scanner::finish() {
+_simdjson_warn_unused _simdjson_inline error_code json_scanner::finish() {
   return string_scanner.finish();
 }
 
@@ -25105,18 +26497,18 @@ private:
   {}
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block_buf, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block);
-  _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block);
+  _simdjson_warn_unused _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
   json_scanner scanner{};
   uint8_t *dst;
 };
 
-_simdjson_inline void json_minifier::next(const simd::simd8x64<uint8_t>& in, const json_block& block) {
+_simdjson_inline void json_minifier::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block) {
   uint64_t mask = block.whitespace();
   dst += in.compress(mask, dst);
 }
 
-_simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
+_simdjson_warn_unused _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
   error_code error = scanner.finish();
   if (error) { dst_len = 0; return error; }
   dst_len = dst - dst_start;
@@ -25125,8 +26517,8 @@ _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &ds
 
 template<>
 _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
-  simd::simd8x64<uint8_t> in_2(block_buf+64);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_2(block_buf+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1);
@@ -25136,7 +26528,7 @@ _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_blo
 
 template<>
 _simdjson_inline void json_minifier::step<64>(const uint8_t *block_buf, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
   json_block block_1 = scanner.next(in_1);
   this->next(block_buf, block_1);
   reader.advance();
@@ -25324,8 +26716,8 @@ private:
   _simdjson_inline json_structural_indexer(uint32_t *structural_indexes);
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx);
-  _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx);
+  _simdjson_warn_unused _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
 
   json_scanner scanner{};
   utf8_checker checker{};
@@ -25403,8 +26795,8 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
 
 template<>
 _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
-  simd::simd8x64<uint8_t> in_2(block+64);
+  _simd::_simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_2(block+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1, reader.block_index());
@@ -25414,13 +26806,13 @@ _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, b
 
 template<>
 _simdjson_inline void json_structural_indexer::step<64>(const uint8_t *block, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_1(block);
   json_block block_1 = scanner.next(in_1);
   this->next(in_1, block_1, reader.block_index());
   reader.advance();
 }
 
-_simdjson_inline void json_structural_indexer::next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
+_simdjson_inline void json_structural_indexer::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
   uint64_t unescaped = in.lteq(0x1F);
 #if _SIMDJSON_UTF8VALIDATION
   checker.check_next_input(in);
@@ -25565,13 +26957,13 @@ bool generic_validate_utf8(const uint8_t * input, size_t length) {
     checker c{};
     buf_block_reader<64> reader(input, length);
     while (reader.has_full_block()) {
-      simd::simd8x64<uint8_t> in(reader.full_block());
+      _simd::_simd8x64<uint8_t> in(reader.full_block());
       c.check_next_input(in);
       reader.advance();
     }
     uint8_t block[64]{};
     reader.get_remainder(block);
-    simd::simd8x64<uint8_t> in(block);
+    _simd::_simd8x64<uint8_t> in(block);
     c.check_next_input(in);
     reader.advance();
     c.check_eof();
@@ -26177,6 +27569,7 @@ _simdjson_warn_unused _simdjson_inline error_code json_iterator::visit_primitive
 /* end file generic/stage2/json_iterator.h for icelake */
 /* including generic/stage2/stringparsing.h for icelake: #include <generic/stage2/stringparsing.h> */
 /* begin file generic/stage2/stringparsing.h for icelake */
+#include <cstdint>
 #ifndef _SIMDJSON_SRC_GENERIC_STAGE2_STRINGPARSING_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
@@ -26329,7 +27722,8 @@ _simdjson_inline bool handle_unicode_codepoint_wobbly(const uint8_t **src_ptr,
 _simdjson_warn_unused _simdjson_inline uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) {
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -26374,7 +27768,8 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
   // It is not ideal that this function is nearly identical to parse_string.
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -26416,6 +27811,7 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
 }
 
 } // namespace stringparsing
+
 } // unnamed namespace
 } // namespace icelake
 } // namespace _simdjson
@@ -26816,14 +28212,14 @@ _simdjson_warn_unused error_code implementation::create_dom_parser_implementatio
 
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // This identifies structural characters (comma, colon, braces, brackets),
 // and ASCII white-space ('\r','\n','\t',' ').
-_simdjson_inline json_character_block json_character_block::classify(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_character_block json_character_block::classify(const _simd::_simd8x64<uint8_t>& in) {
   // These lookups rely on the fact that anything < 127 will match the lower 4 bits, which is why
   // we can't use the generic lookup_16.
-  const auto whitespace_table = simd8<uint8_t>::repeat_16(' ', 100, 100, 100, 17, 100, 113, 2, 100, '\t', '\n', 112, 100, '\r', 100, 100);
+  const auto whitespace_table = _simd8<uint8_t>::repeat_16(' ', 100, 100, 100, 17, 100, 113, 2, 100, '\t', '\n', 112, 100, '\r', 100, 100);
 
   // The 6 operators (:,[]{}) have these values:
   //
@@ -26835,7 +28231,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   // } 7D
   //
   // If you use | 0x20 to turn [ and ] into { and }, the lower 4 bits of each character is unique.
-  // We exploit this, using a simd 4-bit lookup to tell us which character match against, and then
+  // We exploit this, using a _simd 4-bit lookup to tell us which character match against, and then
   // match it (against | 0x20).
   //
   // To prevent recognizing other characters, everything else gets compared with 0, which cannot
@@ -26844,7 +28240,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   // NOTE: Due to the | 0x20, this ALSO treats <FF> and <SUB> (control characters 0C and 1A) like ,
   // and :. This gets caught in stage 2, which checks the actual character to ensure the right
   // operators are in the right places.
-  const auto op_table = simd8<uint8_t>::repeat_16(
+  const auto op_table = _simd8<uint8_t>::repeat_16(
     0, 0, 0, 0,
     0, 0, 0, 0,
     0, 0, ':', '{', // : = 3A, [ = 5B, { = 7B
@@ -26860,7 +28256,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
     _mm512_shuffle_epi8(whitespace_table, in.chunks[0])
   });
   // Turn [ and ] into { and }
-  const simd8x64<uint8_t> curlified{
+  const _simd8x64<uint8_t> curlified{
     in.chunks[0] | 0x20
   };
   const uint64_t op = curlified.eq({
@@ -26870,21 +28266,21 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   return { whitespace, op };
 }
 
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input) {
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input) {
   return input.reduce_or().is_ascii();
 }
 
-_simdjson_unused _simdjson_inline simd8<bool> must_be_continuation(const simd8<uint8_t> prev1, const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-  simd8<uint8_t> is_second_byte = prev1.saturating_sub(0xc0u-1); // Only 11______ will be > 0
-  simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-1); // Only 111_____ will be > 0
-  simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-1); // Only 1111____ will be > 0
+_simdjson_unused _simdjson_inline _simd8<bool> must_be_continuation(const _simd8<uint8_t> prev1, const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+  _simd8<uint8_t> is_second_byte = prev1.saturating_sub(0xc0u-1); // Only 11______ will be > 0
+  _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-1); // Only 111_____ will be > 0
+  _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-1); // Only 1111____ will be > 0
   // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
-  return simd8<int8_t>(is_second_byte | is_third_byte | is_fourth_byte) > int8_t(0);
+  return _simd8<int8_t>(is_second_byte | is_third_byte | is_fourth_byte) > int8_t(0);
 }
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-  simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
-  simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+  _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
+  _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
   return is_third_byte | is_fourth_byte;
 }
 
@@ -26959,25 +28355,28 @@ _simdjson_warn_unused error_code dom_parser_implementation::stage1(const uint8_t
 _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t len) const noexcept {
   return icelake::stage1::generic_validate_utf8(buf,len);
 }
-_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool replacement_char) const noexcept {
-  return icelake::stringparsing::parse_string(src, dst, replacement_char);
+
+_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
+    return icelake::stringparsing::parse_string(src, dst, allow_replacement);
 }
+
+
 _simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return icelake::atomparsing::is_valid_true_atom(src, len);
+    return icelake::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return icelake::atomparsing::is_valid_false_atom(src, len);
+    return icelake::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return icelake::atomparsing::is_valid_null_atom(src, len);
+    return icelake::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return icelake::numberparsing::parse_number(src, writer);
+    return icelake::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::stage2(dom::document &_doc) noexcept {
@@ -26998,28 +28397,30 @@ _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_wobbly_string(co
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return icelake::atomparsing::is_valid_true_atom(src, len);
+    return icelake::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return icelake::atomparsing::is_valid_false_atom(src, len);
+    return icelake::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return icelake::atomparsing::is_valid_null_atom(src, len);
+    return icelake::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return icelake::numberparsing::parse_number(src, writer);
+    return icelake::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse(const uint8_t* _buf, size_t _len, dom::document& _doc, bool all) noexcept {
-  auto error = stage1(_buf, _len, stage1_mode::regular);
-  if (error) { return error; } if (!all) { return error_code(); }
-  return stage2(_doc);
+    auto error = stage1(_buf, _len, stage1_mode::regular);
+    if (error) { return error; } if (!all) { return error_code(); }
+    return stage2(_doc);
 }
+
+
 
 } // namespace icelake
 } // namespace _simdjson
@@ -27078,10 +28479,10 @@ namespace ppc64 {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace ppc64
@@ -27319,15 +28720,15 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_PPC64_NUMBERPARSING_DEFS_H
 /* end file _simdjson/ppc64/numberparsing_defs.h */
-/* including _simdjson/ppc64/simd.h: #include "_simdjson/ppc64/simd.h" */
-/* begin file _simdjson/ppc64/simd.h */
-#ifndef _SIMDJSON_PPC64_SIMD_H
-#define _SIMDJSON_PPC64_SIMD_H
+/* including _simdjson/ppc64/_simd.h: #include "_simdjson/ppc64/_simd.h" */
+/* begin file _simdjson/ppc64/_simd.h */
+#ifndef _SIMDJSON_PPC64__SIMD_H
+#define _SIMDJSON_PPC64__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/ppc64/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/ppc64/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 #include <type_traits>
@@ -27335,7 +28736,7 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 namespace _simdjson {
 namespace ppc64 {
 namespace {
-namespace simd {
+namespace _simd {
 
 using __m128i = __vector unsigned char;
 
@@ -27345,10 +28746,10 @@ template <typename Child> struct base {
   // Zero constructor
   _simdjson_inline base() : value{__m128i()} {}
 
-  // Conversion from SIMD register
+  // Conversion from _SIMD register
   _simdjson_inline base(const __m128i _value) : value(_value) {}
 
-  // Conversion to SIMD register
+  // Conversion to _SIMD register
   _simdjson_inline operator const __m128i &() const {
     return this->value;
   }
@@ -27384,22 +28785,22 @@ template <typename Child> struct base {
   }
 };
 
-template <typename T, typename Mask = simd8<bool>>
-struct base8 : base<simd8<T>> {
+template <typename T, typename Mask = _simd8<bool>>
+struct base8 : base<_simd8<T>> {
   typedef uint16_t bitmask_t;
   typedef uint32_t bitmask2_t;
 
-  _simdjson_inline base8() : base<simd8<T>>() {}
-  _simdjson_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
+  _simdjson_inline base8() : base<_simd8<T>>() {}
+  _simdjson_inline base8(const __m128i _value) : base<_simd8<T>>(_value) {}
 
-  friend _simdjson_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) {
+  friend _simdjson_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) {
     return (__m128i)vec_cmpeq(lhs.value, (__m128i)rhs);
   }
 
-  static const int SIZE = sizeof(base<simd8<T>>::value);
+  static const int SIZE = sizeof(base<_simd8<T>>::value);
 
   template <int N = 1>
-  _simdjson_inline simd8<T> prev(simd8<T> prev_chunk) const {
+  _simdjson_inline _simd8<T> prev(_simd8<T> prev_chunk) const {
     __m128i chunk = this->value;
 #ifdef __LITTLE_ENDIAN__
     chunk = (__m128i)vec_reve(this->value);
@@ -27413,17 +28814,17 @@ struct base8 : base<simd8<T>> {
   }
 };
 
-// SIMD byte mask type (returned by things like eq and gt)
-template <> struct simd8<bool> : base8<bool> {
-  static _simdjson_inline simd8<bool> splat(bool _value) {
+// _SIMD byte mask type (returned by things like eq and gt)
+template <> struct _simd8<bool> : base8<bool> {
+  static _simdjson_inline _simd8<bool> splat(bool _value) {
     return (__m128i)vec_splats((unsigned char)(-(!!_value)));
   }
 
-  _simdjson_inline simd8() : base8<bool>() {}
-  _simdjson_inline simd8(const __m128i _value)
+  _simdjson_inline _simd8() : base8<bool>() {}
+  _simdjson_inline _simd8(const __m128i _value)
       : base8<bool>(_value) {}
   // Splat constructor
-  _simdjson_inline simd8(bool _value)
+  _simdjson_inline _simd8(bool _value)
       : base8<bool>(splat(_value)) {}
 
   _simdjson_inline int to_bitmask() const {
@@ -27442,26 +28843,26 @@ template <> struct simd8<bool> : base8<bool> {
   _simdjson_inline bool any() const {
     return !vec_all_eq(this->value, (__m128i)vec_splats(0));
   }
-  _simdjson_inline simd8<bool> operator~() const {
+  _simdjson_inline _simd8<bool> operator~() const {
     return this->value ^ (__m128i)splat(true);
   }
 };
 
 template <typename T> struct base8_numeric : base8<T> {
-  static _simdjson_inline simd8<T> splat(T value) {
+  static _simdjson_inline _simd8<T> splat(T value) {
     (void)value;
     return (__m128i)vec_splats(value);
   }
-  static _simdjson_inline simd8<T> zero() { return splat(0); }
-  static _simdjson_inline simd8<T> load(const T values[16]) {
+  static _simdjson_inline _simd8<T> zero() { return splat(0); }
+  static _simdjson_inline _simd8<T> load(const T values[16]) {
     return (__m128i)(vec_vsx_ld(0, reinterpret_cast<const uint8_t *>(values)));
   }
   // Repeat 16 values as many times as necessary (usually for lookup tables)
-  static _simdjson_inline simd8<T> repeat_16(T v0, T v1, T v2, T v3, T v4,
+  static _simdjson_inline _simd8<T> repeat_16(T v0, T v1, T v2, T v3, T v4,
                                                    T v5, T v6, T v7, T v8, T v9,
                                                    T v10, T v11, T v12, T v13,
                                                    T v14, T v15) {
-    return simd8<T>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13,
+    return _simd8<T>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13,
                     v14, v15);
   }
 
@@ -27475,28 +28876,28 @@ template <typename T> struct base8_numeric : base8<T> {
   }
 
   // Override to distinguish from bool version
-  _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+  _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
   // Addition/subtraction are the same for signed and unsigned
-  _simdjson_inline simd8<T> operator+(const simd8<T> other) const {
+  _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const {
     return (__m128i)((__m128i)this->value + (__m128i)other);
   }
-  _simdjson_inline simd8<T> operator-(const simd8<T> other) const {
+  _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const {
     return (__m128i)((__m128i)this->value - (__m128i)other);
   }
-  _simdjson_inline simd8<T> &operator+=(const simd8<T> other) {
+  _simdjson_inline _simd8<T> &operator+=(const _simd8<T> other) {
     *this = *this + other;
-    return *static_cast<simd8<T> *>(this);
+    return *static_cast<_simd8<T> *>(this);
   }
-  _simdjson_inline simd8<T> &operator-=(const simd8<T> other) {
+  _simdjson_inline _simd8<T> &operator-=(const _simd8<T> other) {
     *this = *this - other;
-    return *static_cast<simd8<T> *>(this);
+    return *static_cast<_simd8<T> *>(this);
   }
 
   // Perform a lookup assuming the value is between 0 and 16 (undefined behavior
   // for out of range values)
   template <typename L>
-  _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+  _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
     return (__m128i)vec_perm((__m128i)lookup_table, (__m128i)lookup_table, this->value);
   }
 
@@ -27504,7 +28905,7 @@ template <typename T> struct base8_numeric : base8<T> {
   // as a bitset). Passing a 0 value for mask would be equivalent to writing out
   // every byte to output. Only the first 16 - count_ones(mask) bytes of the
   // result are significant but 16 bytes get written. Design consideration: it
-  // seems like a function with the signature simd8<L> compress(uint32_t mask)
+  // seems like a function with the signature _simd8<L> compress(uint32_t mask)
   // would be sensible, but the AVX ISA makes this kind of approach difficult.
   template <typename L>
   _simdjson_inline void compress(uint16_t mask, L *output) const {
@@ -27546,12 +28947,12 @@ template <typename T> struct base8_numeric : base8<T> {
   }
 
   template <typename L>
-  _simdjson_inline simd8<L>
+  _simdjson_inline _simd8<L>
   lookup_16(L replace0, L replace1, L replace2, L replace3, L replace4,
             L replace5, L replace6, L replace7, L replace8, L replace9,
             L replace10, L replace11, L replace12, L replace13, L replace14,
             L replace15) const {
-    return lookup_16(simd8<L>::repeat_16(
+    return lookup_16(_simd8<L>::repeat_16(
         replace0, replace1, replace2, replace3, replace4, replace5, replace6,
         replace7, replace8, replace9, replace10, replace11, replace12,
         replace13, replace14, replace15));
@@ -27559,137 +28960,137 @@ template <typename T> struct base8_numeric : base8<T> {
 };
 
 // Signed bytes
-template <> struct simd8<int8_t> : base8_numeric<int8_t> {
-  _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-  _simdjson_inline simd8(const __m128i _value)
+template <> struct _simd8<int8_t> : base8_numeric<int8_t> {
+  _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+  _simdjson_inline _simd8(const __m128i _value)
       : base8_numeric<int8_t>(_value) {}
   // Splat constructor
-  _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+  _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
   // Array constructor
-  _simdjson_inline simd8(const int8_t *values) : simd8(load(values)) {}
+  _simdjson_inline _simd8(const int8_t *values) : _simd8(load(values)) {}
   // Member-by-member initialization
-  _simdjson_inline simd8(int8_t v0, int8_t v1, int8_t v2, int8_t v3,
+  _simdjson_inline _simd8(int8_t v0, int8_t v1, int8_t v2, int8_t v3,
                                int8_t v4, int8_t v5, int8_t v6, int8_t v7,
                                int8_t v8, int8_t v9, int8_t v10, int8_t v11,
                                int8_t v12, int8_t v13, int8_t v14, int8_t v15)
-      : simd8((__m128i)(__vector signed char){v0, v1, v2, v3, v4, v5, v6, v7,
+      : _simd8((__m128i)(__vector signed char){v0, v1, v2, v3, v4, v5, v6, v7,
                                               v8, v9, v10, v11, v12, v13, v14,
                                               v15}) {}
   // Repeat 16 values as many times as necessary (usually for lookup tables)
-  _simdjson_inline static simd8<int8_t>
+  _simdjson_inline static _simd8<int8_t>
   repeat_16(int8_t v0, int8_t v1, int8_t v2, int8_t v3, int8_t v4, int8_t v5,
             int8_t v6, int8_t v7, int8_t v8, int8_t v9, int8_t v10, int8_t v11,
             int8_t v12, int8_t v13, int8_t v14, int8_t v15) {
-    return simd8<int8_t>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
+    return _simd8<int8_t>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
                          v13, v14, v15);
   }
 
   // Order-sensitive comparisons
-  _simdjson_inline simd8<int8_t>
-  max_val(const simd8<int8_t> other) const {
+  _simdjson_inline _simd8<int8_t>
+  max_val(const _simd8<int8_t> other) const {
     return (__m128i)vec_max((__vector signed char)this->value,
                             (__vector signed char)(__m128i)other);
   }
-  _simdjson_inline simd8<int8_t>
-  min_val(const simd8<int8_t> other) const {
+  _simdjson_inline _simd8<int8_t>
+  min_val(const _simd8<int8_t> other) const {
     return (__m128i)vec_min((__vector signed char)this->value,
                             (__vector signed char)(__m128i)other);
   }
-  _simdjson_inline simd8<bool>
-  operator>(const simd8<int8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator>(const _simd8<int8_t> other) const {
     return (__m128i)vec_cmpgt((__vector signed char)this->value,
                               (__vector signed char)(__m128i)other);
   }
-  _simdjson_inline simd8<bool>
-  operator<(const simd8<int8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator<(const _simd8<int8_t> other) const {
     return (__m128i)vec_cmplt((__vector signed char)this->value,
                               (__vector signed char)(__m128i)other);
   }
 };
 
 // Unsigned bytes
-template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
-  _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-  _simdjson_inline simd8(const __m128i _value)
+template <> struct _simd8<uint8_t> : base8_numeric<uint8_t> {
+  _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+  _simdjson_inline _simd8(const __m128i _value)
       : base8_numeric<uint8_t>(_value) {}
   // Splat constructor
-  _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+  _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
   // Array constructor
-  _simdjson_inline simd8(const uint8_t *values) : simd8(load(values)) {}
+  _simdjson_inline _simd8(const uint8_t *values) : _simd8(load(values)) {}
   // Member-by-member initialization
   _simdjson_inline
-  simd8(uint8_t v0, uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4, uint8_t v5,
+  _simd8(uint8_t v0, uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4, uint8_t v5,
         uint8_t v6, uint8_t v7, uint8_t v8, uint8_t v9, uint8_t v10,
         uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15)
-      : simd8((__m128i){v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
+      : _simd8((__m128i){v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
                         v13, v14, v15}) {}
   // Repeat 16 values as many times as necessary (usually for lookup tables)
-  _simdjson_inline static simd8<uint8_t>
+  _simdjson_inline static _simd8<uint8_t>
   repeat_16(uint8_t v0, uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4,
             uint8_t v5, uint8_t v6, uint8_t v7, uint8_t v8, uint8_t v9,
             uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14,
             uint8_t v15) {
-    return simd8<uint8_t>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
+    return _simd8<uint8_t>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
                           v13, v14, v15);
   }
 
   // Saturated math
-  _simdjson_inline simd8<uint8_t>
-  saturating_add(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  saturating_add(const _simd8<uint8_t> other) const {
     return (__m128i)vec_adds(this->value, (__m128i)other);
   }
-  _simdjson_inline simd8<uint8_t>
-  saturating_sub(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  saturating_sub(const _simd8<uint8_t> other) const {
     return (__m128i)vec_subs(this->value, (__m128i)other);
   }
 
   // Order-specific operations
-  _simdjson_inline simd8<uint8_t>
-  max_val(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  max_val(const _simd8<uint8_t> other) const {
     return (__m128i)vec_max(this->value, (__m128i)other);
   }
-  _simdjson_inline simd8<uint8_t>
-  min_val(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  min_val(const _simd8<uint8_t> other) const {
     return (__m128i)vec_min(this->value, (__m128i)other);
   }
   // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-  _simdjson_inline simd8<uint8_t>
-  gt_bits(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  gt_bits(const _simd8<uint8_t> other) const {
     return this->saturating_sub(other);
   }
   // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-  _simdjson_inline simd8<uint8_t>
-  lt_bits(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  lt_bits(const _simd8<uint8_t> other) const {
     return other.saturating_sub(*this);
   }
-  _simdjson_inline simd8<bool>
-  operator<=(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator<=(const _simd8<uint8_t> other) const {
     return other.max_val(*this) == other;
   }
-  _simdjson_inline simd8<bool>
-  operator>=(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator>=(const _simd8<uint8_t> other) const {
     return other.min_val(*this) == other;
   }
-  _simdjson_inline simd8<bool>
-  operator>(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator>(const _simd8<uint8_t> other) const {
     return this->gt_bits(other).any_bits_set();
   }
-  _simdjson_inline simd8<bool>
-  operator<(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator<(const _simd8<uint8_t> other) const {
     return this->gt_bits(other).any_bits_set();
   }
 
   // Bit-specific operations
-  _simdjson_inline simd8<bool> bits_not_set() const {
+  _simdjson_inline _simd8<bool> bits_not_set() const {
     return (__m128i)vec_cmpeq(this->value, (__m128i)vec_splats(uint8_t(0)));
   }
-  _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const {
+  _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const {
     return (*this & bits).bits_not_set();
   }
-  _simdjson_inline simd8<bool> any_bits_set() const {
+  _simdjson_inline _simd8<bool> any_bits_set() const {
     return ~this->bits_not_set();
   }
-  _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const {
+  _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const {
     return ~this->bits_not_set(bits);
   }
   _simdjson_inline bool bits_not_set_anywhere() const {
@@ -27698,49 +29099,49 @@ template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
   _simdjson_inline bool any_bits_set_anywhere() const {
     return !bits_not_set_anywhere();
   }
-  _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const {
+  _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const {
     return vec_all_eq(vec_and(this->value, (__m128i)bits),
                       (__m128i)vec_splats(0));
   }
-  _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const {
+  _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const {
     return !bits_not_set_anywhere(bits);
   }
-  template <int N> _simdjson_inline simd8<uint8_t> shr() const {
-    return simd8<uint8_t>(
+  template <int N> _simdjson_inline _simd8<uint8_t> shr() const {
+    return _simd8<uint8_t>(
         (__m128i)vec_sr(this->value, (__m128i)vec_splat_u8(N)));
   }
-  template <int N> _simdjson_inline simd8<uint8_t> shl() const {
-    return simd8<uint8_t>(
+  template <int N> _simdjson_inline _simd8<uint8_t> shl() const {
+    return _simd8<uint8_t>(
         (__m128i)vec_sl(this->value, (__m128i)vec_splat_u8(N)));
   }
 };
 
-template <typename T> struct simd8x64 {
-  static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+template <typename T> struct _simd8x64 {
+  static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
   static_assert(NUM_CHUNKS == 4,
                 "PPC64 kernel should use four registers per 64-byte block.");
-  const simd8<T> chunks[NUM_CHUNKS];
+  const _simd8<T> chunks[NUM_CHUNKS];
 
-  simd8x64(const simd8x64<T> &o) = delete; // no copy allowed
-  simd8x64<T> &
-  operator=(const simd8<T>& other) = delete; // no assignment allowed
-  simd8x64() = delete;                      // no default constructor allowed
+  _simd8x64(const _simd8x64<T> &o) = delete; // no copy allowed
+  _simd8x64<T> &
+  operator=(const _simd8<T>& other) = delete; // no assignment allowed
+  _simd8x64() = delete;                      // no default constructor allowed
 
-  _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1,
-                                  const simd8<T> chunk2, const simd8<T> chunk3)
+  _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1,
+                                  const _simd8<T> chunk2, const _simd8<T> chunk3)
       : chunks{chunk0, chunk1, chunk2, chunk3} {}
-  _simdjson_inline simd8x64(const T ptr[64])
-      : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr + 16),
-               simd8<T>::load(ptr + 32), simd8<T>::load(ptr + 48)} {}
+  _simdjson_inline _simd8x64(const T ptr[64])
+      : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr + 16),
+               _simd8<T>::load(ptr + 32), _simd8<T>::load(ptr + 48)} {}
 
   _simdjson_inline void store(T ptr[64]) const {
-    this->chunks[0].store(ptr + sizeof(simd8<T>) * 0);
-    this->chunks[1].store(ptr + sizeof(simd8<T>) * 1);
-    this->chunks[2].store(ptr + sizeof(simd8<T>) * 2);
-    this->chunks[3].store(ptr + sizeof(simd8<T>) * 3);
+    this->chunks[0].store(ptr + sizeof(_simd8<T>) * 0);
+    this->chunks[1].store(ptr + sizeof(_simd8<T>) * 1);
+    this->chunks[2].store(ptr + sizeof(_simd8<T>) * 2);
+    this->chunks[3].store(ptr + sizeof(_simd8<T>) * 3);
   }
 
-  _simdjson_inline simd8<T> reduce_or() const {
+  _simdjson_inline _simd8<T> reduce_or() const {
     return (this->chunks[0] | this->chunks[1]) |
            (this->chunks[2] | this->chunks[3]);
   }
@@ -27765,14 +29166,14 @@ template <typename T> struct simd8x64 {
   }
 
   _simdjson_inline uint64_t eq(const T m) const {
-    const simd8<T> mask = simd8<T>::splat(m);
-    return simd8x64<bool>(this->chunks[0] == mask, this->chunks[1] == mask,
+    const _simd8<T> mask = _simd8<T>::splat(m);
+    return _simd8x64<bool>(this->chunks[0] == mask, this->chunks[1] == mask,
                           this->chunks[2] == mask, this->chunks[3] == mask)
         .to_bitmask();
   }
 
-  _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-    return simd8x64<bool>(this->chunks[0] == other.chunks[0],
+  _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+    return _simd8x64<bool>(this->chunks[0] == other.chunks[0],
                           this->chunks[1] == other.chunks[1],
                           this->chunks[2] == other.chunks[2],
                           this->chunks[3] == other.chunks[3])
@@ -27780,20 +29181,20 @@ template <typename T> struct simd8x64 {
   }
 
   _simdjson_inline uint64_t lteq(const T m) const {
-    const simd8<T> mask = simd8<T>::splat(m);
-    return simd8x64<bool>(this->chunks[0] <= mask, this->chunks[1] <= mask,
+    const _simd8<T> mask = _simd8<T>::splat(m);
+    return _simd8x64<bool>(this->chunks[0] <= mask, this->chunks[1] <= mask,
                           this->chunks[2] <= mask, this->chunks[3] <= mask)
         .to_bitmask();
   }
-}; // struct simd8x64<T>
+}; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace ppc64
 } // namespace _simdjson
 
-#endif // _SIMDJSON_PPC64_SIMD_INPUT_H
-/* end file _simdjson/ppc64/simd.h */
+#endif // _SIMDJSON_PPC64__SIMD_INPUT_H
+/* end file _simdjson/ppc64/_simd.h */
 /* including _simdjson/ppc64/stringparsing_defs.h: #include "_simdjson/ppc64/stringparsing_defs.h" */
 /* begin file _simdjson/ppc64/stringparsing_defs.h */
 #ifndef _SIMDJSON_PPC64_STRINGPARSING_DEFS_H
@@ -27802,20 +29203,20 @@ template <typename T> struct simd8x64 {
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/ppc64/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/ppc64/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/ppc64/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/ppc64/_simd.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace ppc64 {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote
+  _simdjson_inline backslash_and_quote
   copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() {
@@ -27840,8 +29241,8 @@ backslash_and_quote::copy_and_find(const uint8_t *src, uint8_t *dst) {
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1),
                 "backslash and quote finder must process fewer than "
                 "_SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v0(src);
-  simd8<uint8_t> v1(src + sizeof(v0));
+  _simd8<uint8_t> v0(src);
+  _simd8<uint8_t> v1(src + sizeof(v0));
   v0.store(dst);
   v1.store(dst + sizeof(v0));
 
@@ -27849,10 +29250,36 @@ backslash_and_quote::copy_and_find(const uint8_t *src, uint8_t *dst) {
   // PPC; therefore, we smash them together into a 64-byte mask and get the
   // bitmask from there.
   uint64_t bs_and_quote =
-      simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
+      _simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
   return {
       uint32_t(bs_and_quote),      // bs_bits
       uint32_t(bs_and_quote >> 32) // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    // We store it as a 64-bit bitmask even though we only need 16 bits.
+    uint64_t((is_backslash | is_quote | is_control).to_bitmask())
   };
 }
 
@@ -28151,19 +29578,23 @@ public:
   inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
   dom_parser_implementation(const dom_parser_implementation &) = delete;
   dom_parser_implementation &operator=(const dom_parser_implementation &) = delete;
-  virtual _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
 
-  virtual _simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
+  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
+  _simdjson_warn_unused error_code stage1(const uint8_t* buf, size_t len, stage1_mode partial) noexcept final;
+  _simdjson_warn_unused error_code stage2(dom::document& doc) noexcept final;
+  _simdjson_warn_unused error_code stage2_next(dom::document& doc) noexcept final;
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept final;
+  _simdjson_warn_unused uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept final;
+
+
   _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
   _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
-  virtual  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
-  virtual inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
+  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
+  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
 private:
   _simdjson_inline _simdjson_warn_unused error_code set_capacity_stage1(size_t capacity);
 
@@ -28279,12 +29710,17 @@ struct implementation__simdjson_result_base {
    *
    * @param value The variable to assign the value to. May not be set if there is an error.
    */
-  _simdjson_inline error_code get(T &value) && noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
    * The error.
    */
-  _simdjson_inline error_code error() const noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code error() const noexcept;
+
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_warn_unused _simdjson_inline bool has_value() const noexcept;
 
 #if _SIMDJSON_EXCEPTIONS
 
@@ -28293,6 +29729,16 @@ struct implementation__simdjson_result_base {
    *
    * @throw _simdjson_error if there was an error.
    */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
+
   _simdjson_inline T& value() & noexcept(false);
 
   /**
@@ -28334,6 +29780,10 @@ struct implementation__simdjson_result_base {
    * the error() method returns a value that evaluates to false.
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
+
+  using value_type = T;
+  using error_type = error_code;
+
 protected:
   /** users should never directly access first and second. **/
   T first{}; /** Users should never directly access 'first'. **/
@@ -28516,7 +29966,12 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
   // with a returned value of type value128 with a "low component" corresponding to the
   // 64-bit least significant bits of the product and with a "high component" corresponding
   // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+  _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index]);
+#else
   _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index]);
+#endif
+
   // Both i and power_of_five_128[index] have their most significant bit set to 1 which
   // implies that the either the most or the second most significant bit of the product
   // is 1. We pack values in this manner for efficiency reasons: it maximizes the use
@@ -28549,7 +30004,11 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
     // with a returned value of type value128 with a "low component" corresponding to the
     // 64-bit least significant bits of the product and with a "high component" corresponding
     // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+    _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index + 1]);
+#else
     _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index + 1]);
+#endif
     firstproduct.low += secondproduct.high;
     if(secondproduct.high > firstproduct.low) { firstproduct.high++; }
     // As it has been proven by Noble Mushtak and Daniel Lemire in "Fast Number Parsing Without
@@ -28710,7 +30169,7 @@ _simdjson_inline bool is_digit(const uint8_t c) {
   return static_cast<uint8_t>(c - '0') <= 9;
 }
 
-_simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
   // we continue with the fiction that we have an integer. If the
   // floating point number is representable as x * 10^z for some integer
   // z that fits in 53 bits, then we will be able to convert back the
@@ -28738,7 +30197,7 @@ _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const
   return SUCCESS;
 }
 
-_simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
   // Exp Sign: -123.456e[-]78
   bool neg_exp = ('-' == *p);
   if (neg_exp || '+' == *p) { p++; } // Skip + as well
@@ -28827,7 +30286,7 @@ static error_code slow_float_parsing(_simdjson_unused const uint8_t * src, doubl
 
 /** @private */
 template<typename W>
-_simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
   // If we frequently had to deal with long strings of digits,
   // we could extend our code by using a 128-bit integer instead
   // of a 64-bit integer. However, this is uncommon in practice.
@@ -28890,13 +30349,13 @@ _simdjson_inline error_code write_float(const uint8_t *const src, bool negative,
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
 
 // for performance analysis, it is sometimes  useful to skip parsing
 #ifdef _SIMDJSON_SKIPNUMBERPARSING
 
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
   writer.append_s64(0);        // always write zero
   return SUCCESS;              // always succeeds
 }
@@ -28922,7 +30381,7 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   //
   // Check for minus sign
   //
@@ -28996,7 +30455,16 @@ _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   if (i > uint64_t(INT64_MAX)) {
     WRITE_UNSIGNED(i, src, writer);
   } else {
-    WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+    if(i == 0 && negative) {
+      // We have to write -0.0 instead of 0
+      WRITE_DOUBLE(-0.0, src, writer);
+    } else {
+      WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+    }
+#else
+  WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#endif
   }
   if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return INVALID_NUMBER(src); }
   return SUCCESS;
@@ -29457,6 +30925,12 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
       if (_simdjson_unlikely(digit_count == 19 && memcmp(src, smaller_big_integer, 19) > 0)) {
         return number_type::big_integer;
       }
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+      if(digit_count == 1 && src[0] == '0') {
+        // We have to write -0.0 instead of 0
+        return number_type::floating_point_number;
+      }
+#endif
       return number_type::signed_integer;
     }
     // Let us check if we have a big integer (>=2**64).
@@ -29691,11 +31165,40 @@ _simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_resul
 }
 
 template<typename T>
-_simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
+_simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_warn_unused _simdjson_inline bool implementation__simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+template<typename T>
+_simdjson_inline T& implementation__simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& implementation__simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<implementation__simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* implementation__simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* implementation__simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& implementation__simdjson_result_base<T>::value() & noexcept(false) {
@@ -29801,12 +31304,15 @@ public:
                                          size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf,
                                           size_t len) const noexcept final;
-                                          _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
-                                          _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-                                          _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
-                                        
-                                          _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-                                          _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
+
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+
 };
 
 } // namespace ppc64
@@ -29837,10 +31343,10 @@ namespace ppc64 {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace ppc64
@@ -30078,15 +31584,15 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_PPC64_NUMBERPARSING_DEFS_H
 /* end file _simdjson/ppc64/numberparsing_defs.h */
-/* including _simdjson/ppc64/simd.h: #include "_simdjson/ppc64/simd.h" */
-/* begin file _simdjson/ppc64/simd.h */
-#ifndef _SIMDJSON_PPC64_SIMD_H
-#define _SIMDJSON_PPC64_SIMD_H
+/* including _simdjson/ppc64/_simd.h: #include "_simdjson/ppc64/_simd.h" */
+/* begin file _simdjson/ppc64/_simd.h */
+#ifndef _SIMDJSON_PPC64__SIMD_H
+#define _SIMDJSON_PPC64__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/ppc64/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/ppc64/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 #include <type_traits>
@@ -30094,7 +31600,7 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 namespace _simdjson {
 namespace ppc64 {
 namespace {
-namespace simd {
+namespace _simd {
 
 using __m128i = __vector unsigned char;
 
@@ -30104,10 +31610,10 @@ template <typename Child> struct base {
   // Zero constructor
   _simdjson_inline base() : value{__m128i()} {}
 
-  // Conversion from SIMD register
+  // Conversion from _SIMD register
   _simdjson_inline base(const __m128i _value) : value(_value) {}
 
-  // Conversion to SIMD register
+  // Conversion to _SIMD register
   _simdjson_inline operator const __m128i &() const {
     return this->value;
   }
@@ -30143,22 +31649,22 @@ template <typename Child> struct base {
   }
 };
 
-template <typename T, typename Mask = simd8<bool>>
-struct base8 : base<simd8<T>> {
+template <typename T, typename Mask = _simd8<bool>>
+struct base8 : base<_simd8<T>> {
   typedef uint16_t bitmask_t;
   typedef uint32_t bitmask2_t;
 
-  _simdjson_inline base8() : base<simd8<T>>() {}
-  _simdjson_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
+  _simdjson_inline base8() : base<_simd8<T>>() {}
+  _simdjson_inline base8(const __m128i _value) : base<_simd8<T>>(_value) {}
 
-  friend _simdjson_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) {
+  friend _simdjson_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) {
     return (__m128i)vec_cmpeq(lhs.value, (__m128i)rhs);
   }
 
-  static const int SIZE = sizeof(base<simd8<T>>::value);
+  static const int SIZE = sizeof(base<_simd8<T>>::value);
 
   template <int N = 1>
-  _simdjson_inline simd8<T> prev(simd8<T> prev_chunk) const {
+  _simdjson_inline _simd8<T> prev(_simd8<T> prev_chunk) const {
     __m128i chunk = this->value;
 #ifdef __LITTLE_ENDIAN__
     chunk = (__m128i)vec_reve(this->value);
@@ -30172,17 +31678,17 @@ struct base8 : base<simd8<T>> {
   }
 };
 
-// SIMD byte mask type (returned by things like eq and gt)
-template <> struct simd8<bool> : base8<bool> {
-  static _simdjson_inline simd8<bool> splat(bool _value) {
+// _SIMD byte mask type (returned by things like eq and gt)
+template <> struct _simd8<bool> : base8<bool> {
+  static _simdjson_inline _simd8<bool> splat(bool _value) {
     return (__m128i)vec_splats((unsigned char)(-(!!_value)));
   }
 
-  _simdjson_inline simd8() : base8<bool>() {}
-  _simdjson_inline simd8(const __m128i _value)
+  _simdjson_inline _simd8() : base8<bool>() {}
+  _simdjson_inline _simd8(const __m128i _value)
       : base8<bool>(_value) {}
   // Splat constructor
-  _simdjson_inline simd8(bool _value)
+  _simdjson_inline _simd8(bool _value)
       : base8<bool>(splat(_value)) {}
 
   _simdjson_inline int to_bitmask() const {
@@ -30201,26 +31707,26 @@ template <> struct simd8<bool> : base8<bool> {
   _simdjson_inline bool any() const {
     return !vec_all_eq(this->value, (__m128i)vec_splats(0));
   }
-  _simdjson_inline simd8<bool> operator~() const {
+  _simdjson_inline _simd8<bool> operator~() const {
     return this->value ^ (__m128i)splat(true);
   }
 };
 
 template <typename T> struct base8_numeric : base8<T> {
-  static _simdjson_inline simd8<T> splat(T value) {
+  static _simdjson_inline _simd8<T> splat(T value) {
     (void)value;
     return (__m128i)vec_splats(value);
   }
-  static _simdjson_inline simd8<T> zero() { return splat(0); }
-  static _simdjson_inline simd8<T> load(const T values[16]) {
+  static _simdjson_inline _simd8<T> zero() { return splat(0); }
+  static _simdjson_inline _simd8<T> load(const T values[16]) {
     return (__m128i)(vec_vsx_ld(0, reinterpret_cast<const uint8_t *>(values)));
   }
   // Repeat 16 values as many times as necessary (usually for lookup tables)
-  static _simdjson_inline simd8<T> repeat_16(T v0, T v1, T v2, T v3, T v4,
+  static _simdjson_inline _simd8<T> repeat_16(T v0, T v1, T v2, T v3, T v4,
                                                    T v5, T v6, T v7, T v8, T v9,
                                                    T v10, T v11, T v12, T v13,
                                                    T v14, T v15) {
-    return simd8<T>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13,
+    return _simd8<T>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13,
                     v14, v15);
   }
 
@@ -30234,28 +31740,28 @@ template <typename T> struct base8_numeric : base8<T> {
   }
 
   // Override to distinguish from bool version
-  _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+  _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
   // Addition/subtraction are the same for signed and unsigned
-  _simdjson_inline simd8<T> operator+(const simd8<T> other) const {
+  _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const {
     return (__m128i)((__m128i)this->value + (__m128i)other);
   }
-  _simdjson_inline simd8<T> operator-(const simd8<T> other) const {
+  _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const {
     return (__m128i)((__m128i)this->value - (__m128i)other);
   }
-  _simdjson_inline simd8<T> &operator+=(const simd8<T> other) {
+  _simdjson_inline _simd8<T> &operator+=(const _simd8<T> other) {
     *this = *this + other;
-    return *static_cast<simd8<T> *>(this);
+    return *static_cast<_simd8<T> *>(this);
   }
-  _simdjson_inline simd8<T> &operator-=(const simd8<T> other) {
+  _simdjson_inline _simd8<T> &operator-=(const _simd8<T> other) {
     *this = *this - other;
-    return *static_cast<simd8<T> *>(this);
+    return *static_cast<_simd8<T> *>(this);
   }
 
   // Perform a lookup assuming the value is between 0 and 16 (undefined behavior
   // for out of range values)
   template <typename L>
-  _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+  _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
     return (__m128i)vec_perm((__m128i)lookup_table, (__m128i)lookup_table, this->value);
   }
 
@@ -30263,7 +31769,7 @@ template <typename T> struct base8_numeric : base8<T> {
   // as a bitset). Passing a 0 value for mask would be equivalent to writing out
   // every byte to output. Only the first 16 - count_ones(mask) bytes of the
   // result are significant but 16 bytes get written. Design consideration: it
-  // seems like a function with the signature simd8<L> compress(uint32_t mask)
+  // seems like a function with the signature _simd8<L> compress(uint32_t mask)
   // would be sensible, but the AVX ISA makes this kind of approach difficult.
   template <typename L>
   _simdjson_inline void compress(uint16_t mask, L *output) const {
@@ -30305,12 +31811,12 @@ template <typename T> struct base8_numeric : base8<T> {
   }
 
   template <typename L>
-  _simdjson_inline simd8<L>
+  _simdjson_inline _simd8<L>
   lookup_16(L replace0, L replace1, L replace2, L replace3, L replace4,
             L replace5, L replace6, L replace7, L replace8, L replace9,
             L replace10, L replace11, L replace12, L replace13, L replace14,
             L replace15) const {
-    return lookup_16(simd8<L>::repeat_16(
+    return lookup_16(_simd8<L>::repeat_16(
         replace0, replace1, replace2, replace3, replace4, replace5, replace6,
         replace7, replace8, replace9, replace10, replace11, replace12,
         replace13, replace14, replace15));
@@ -30318,137 +31824,137 @@ template <typename T> struct base8_numeric : base8<T> {
 };
 
 // Signed bytes
-template <> struct simd8<int8_t> : base8_numeric<int8_t> {
-  _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-  _simdjson_inline simd8(const __m128i _value)
+template <> struct _simd8<int8_t> : base8_numeric<int8_t> {
+  _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+  _simdjson_inline _simd8(const __m128i _value)
       : base8_numeric<int8_t>(_value) {}
   // Splat constructor
-  _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+  _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
   // Array constructor
-  _simdjson_inline simd8(const int8_t *values) : simd8(load(values)) {}
+  _simdjson_inline _simd8(const int8_t *values) : _simd8(load(values)) {}
   // Member-by-member initialization
-  _simdjson_inline simd8(int8_t v0, int8_t v1, int8_t v2, int8_t v3,
+  _simdjson_inline _simd8(int8_t v0, int8_t v1, int8_t v2, int8_t v3,
                                int8_t v4, int8_t v5, int8_t v6, int8_t v7,
                                int8_t v8, int8_t v9, int8_t v10, int8_t v11,
                                int8_t v12, int8_t v13, int8_t v14, int8_t v15)
-      : simd8((__m128i)(__vector signed char){v0, v1, v2, v3, v4, v5, v6, v7,
+      : _simd8((__m128i)(__vector signed char){v0, v1, v2, v3, v4, v5, v6, v7,
                                               v8, v9, v10, v11, v12, v13, v14,
                                               v15}) {}
   // Repeat 16 values as many times as necessary (usually for lookup tables)
-  _simdjson_inline static simd8<int8_t>
+  _simdjson_inline static _simd8<int8_t>
   repeat_16(int8_t v0, int8_t v1, int8_t v2, int8_t v3, int8_t v4, int8_t v5,
             int8_t v6, int8_t v7, int8_t v8, int8_t v9, int8_t v10, int8_t v11,
             int8_t v12, int8_t v13, int8_t v14, int8_t v15) {
-    return simd8<int8_t>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
+    return _simd8<int8_t>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
                          v13, v14, v15);
   }
 
   // Order-sensitive comparisons
-  _simdjson_inline simd8<int8_t>
-  max_val(const simd8<int8_t> other) const {
+  _simdjson_inline _simd8<int8_t>
+  max_val(const _simd8<int8_t> other) const {
     return (__m128i)vec_max((__vector signed char)this->value,
                             (__vector signed char)(__m128i)other);
   }
-  _simdjson_inline simd8<int8_t>
-  min_val(const simd8<int8_t> other) const {
+  _simdjson_inline _simd8<int8_t>
+  min_val(const _simd8<int8_t> other) const {
     return (__m128i)vec_min((__vector signed char)this->value,
                             (__vector signed char)(__m128i)other);
   }
-  _simdjson_inline simd8<bool>
-  operator>(const simd8<int8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator>(const _simd8<int8_t> other) const {
     return (__m128i)vec_cmpgt((__vector signed char)this->value,
                               (__vector signed char)(__m128i)other);
   }
-  _simdjson_inline simd8<bool>
-  operator<(const simd8<int8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator<(const _simd8<int8_t> other) const {
     return (__m128i)vec_cmplt((__vector signed char)this->value,
                               (__vector signed char)(__m128i)other);
   }
 };
 
 // Unsigned bytes
-template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
-  _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-  _simdjson_inline simd8(const __m128i _value)
+template <> struct _simd8<uint8_t> : base8_numeric<uint8_t> {
+  _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+  _simdjson_inline _simd8(const __m128i _value)
       : base8_numeric<uint8_t>(_value) {}
   // Splat constructor
-  _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+  _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
   // Array constructor
-  _simdjson_inline simd8(const uint8_t *values) : simd8(load(values)) {}
+  _simdjson_inline _simd8(const uint8_t *values) : _simd8(load(values)) {}
   // Member-by-member initialization
   _simdjson_inline
-  simd8(uint8_t v0, uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4, uint8_t v5,
+  _simd8(uint8_t v0, uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4, uint8_t v5,
         uint8_t v6, uint8_t v7, uint8_t v8, uint8_t v9, uint8_t v10,
         uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15)
-      : simd8((__m128i){v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
+      : _simd8((__m128i){v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
                         v13, v14, v15}) {}
   // Repeat 16 values as many times as necessary (usually for lookup tables)
-  _simdjson_inline static simd8<uint8_t>
+  _simdjson_inline static _simd8<uint8_t>
   repeat_16(uint8_t v0, uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4,
             uint8_t v5, uint8_t v6, uint8_t v7, uint8_t v8, uint8_t v9,
             uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14,
             uint8_t v15) {
-    return simd8<uint8_t>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
+    return _simd8<uint8_t>(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12,
                           v13, v14, v15);
   }
 
   // Saturated math
-  _simdjson_inline simd8<uint8_t>
-  saturating_add(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  saturating_add(const _simd8<uint8_t> other) const {
     return (__m128i)vec_adds(this->value, (__m128i)other);
   }
-  _simdjson_inline simd8<uint8_t>
-  saturating_sub(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  saturating_sub(const _simd8<uint8_t> other) const {
     return (__m128i)vec_subs(this->value, (__m128i)other);
   }
 
   // Order-specific operations
-  _simdjson_inline simd8<uint8_t>
-  max_val(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  max_val(const _simd8<uint8_t> other) const {
     return (__m128i)vec_max(this->value, (__m128i)other);
   }
-  _simdjson_inline simd8<uint8_t>
-  min_val(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  min_val(const _simd8<uint8_t> other) const {
     return (__m128i)vec_min(this->value, (__m128i)other);
   }
   // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-  _simdjson_inline simd8<uint8_t>
-  gt_bits(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  gt_bits(const _simd8<uint8_t> other) const {
     return this->saturating_sub(other);
   }
   // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-  _simdjson_inline simd8<uint8_t>
-  lt_bits(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<uint8_t>
+  lt_bits(const _simd8<uint8_t> other) const {
     return other.saturating_sub(*this);
   }
-  _simdjson_inline simd8<bool>
-  operator<=(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator<=(const _simd8<uint8_t> other) const {
     return other.max_val(*this) == other;
   }
-  _simdjson_inline simd8<bool>
-  operator>=(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator>=(const _simd8<uint8_t> other) const {
     return other.min_val(*this) == other;
   }
-  _simdjson_inline simd8<bool>
-  operator>(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator>(const _simd8<uint8_t> other) const {
     return this->gt_bits(other).any_bits_set();
   }
-  _simdjson_inline simd8<bool>
-  operator<(const simd8<uint8_t> other) const {
+  _simdjson_inline _simd8<bool>
+  operator<(const _simd8<uint8_t> other) const {
     return this->gt_bits(other).any_bits_set();
   }
 
   // Bit-specific operations
-  _simdjson_inline simd8<bool> bits_not_set() const {
+  _simdjson_inline _simd8<bool> bits_not_set() const {
     return (__m128i)vec_cmpeq(this->value, (__m128i)vec_splats(uint8_t(0)));
   }
-  _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const {
+  _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const {
     return (*this & bits).bits_not_set();
   }
-  _simdjson_inline simd8<bool> any_bits_set() const {
+  _simdjson_inline _simd8<bool> any_bits_set() const {
     return ~this->bits_not_set();
   }
-  _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const {
+  _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const {
     return ~this->bits_not_set(bits);
   }
   _simdjson_inline bool bits_not_set_anywhere() const {
@@ -30457,49 +31963,49 @@ template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
   _simdjson_inline bool any_bits_set_anywhere() const {
     return !bits_not_set_anywhere();
   }
-  _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const {
+  _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const {
     return vec_all_eq(vec_and(this->value, (__m128i)bits),
                       (__m128i)vec_splats(0));
   }
-  _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const {
+  _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const {
     return !bits_not_set_anywhere(bits);
   }
-  template <int N> _simdjson_inline simd8<uint8_t> shr() const {
-    return simd8<uint8_t>(
+  template <int N> _simdjson_inline _simd8<uint8_t> shr() const {
+    return _simd8<uint8_t>(
         (__m128i)vec_sr(this->value, (__m128i)vec_splat_u8(N)));
   }
-  template <int N> _simdjson_inline simd8<uint8_t> shl() const {
-    return simd8<uint8_t>(
+  template <int N> _simdjson_inline _simd8<uint8_t> shl() const {
+    return _simd8<uint8_t>(
         (__m128i)vec_sl(this->value, (__m128i)vec_splat_u8(N)));
   }
 };
 
-template <typename T> struct simd8x64 {
-  static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+template <typename T> struct _simd8x64 {
+  static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
   static_assert(NUM_CHUNKS == 4,
                 "PPC64 kernel should use four registers per 64-byte block.");
-  const simd8<T> chunks[NUM_CHUNKS];
+  const _simd8<T> chunks[NUM_CHUNKS];
 
-  simd8x64(const simd8x64<T> &o) = delete; // no copy allowed
-  simd8x64<T> &
-  operator=(const simd8<T>& other) = delete; // no assignment allowed
-  simd8x64() = delete;                      // no default constructor allowed
+  _simd8x64(const _simd8x64<T> &o) = delete; // no copy allowed
+  _simd8x64<T> &
+  operator=(const _simd8<T>& other) = delete; // no assignment allowed
+  _simd8x64() = delete;                      // no default constructor allowed
 
-  _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1,
-                                  const simd8<T> chunk2, const simd8<T> chunk3)
+  _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1,
+                                  const _simd8<T> chunk2, const _simd8<T> chunk3)
       : chunks{chunk0, chunk1, chunk2, chunk3} {}
-  _simdjson_inline simd8x64(const T ptr[64])
-      : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr + 16),
-               simd8<T>::load(ptr + 32), simd8<T>::load(ptr + 48)} {}
+  _simdjson_inline _simd8x64(const T ptr[64])
+      : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr + 16),
+               _simd8<T>::load(ptr + 32), _simd8<T>::load(ptr + 48)} {}
 
   _simdjson_inline void store(T ptr[64]) const {
-    this->chunks[0].store(ptr + sizeof(simd8<T>) * 0);
-    this->chunks[1].store(ptr + sizeof(simd8<T>) * 1);
-    this->chunks[2].store(ptr + sizeof(simd8<T>) * 2);
-    this->chunks[3].store(ptr + sizeof(simd8<T>) * 3);
+    this->chunks[0].store(ptr + sizeof(_simd8<T>) * 0);
+    this->chunks[1].store(ptr + sizeof(_simd8<T>) * 1);
+    this->chunks[2].store(ptr + sizeof(_simd8<T>) * 2);
+    this->chunks[3].store(ptr + sizeof(_simd8<T>) * 3);
   }
 
-  _simdjson_inline simd8<T> reduce_or() const {
+  _simdjson_inline _simd8<T> reduce_or() const {
     return (this->chunks[0] | this->chunks[1]) |
            (this->chunks[2] | this->chunks[3]);
   }
@@ -30524,14 +32030,14 @@ template <typename T> struct simd8x64 {
   }
 
   _simdjson_inline uint64_t eq(const T m) const {
-    const simd8<T> mask = simd8<T>::splat(m);
-    return simd8x64<bool>(this->chunks[0] == mask, this->chunks[1] == mask,
+    const _simd8<T> mask = _simd8<T>::splat(m);
+    return _simd8x64<bool>(this->chunks[0] == mask, this->chunks[1] == mask,
                           this->chunks[2] == mask, this->chunks[3] == mask)
         .to_bitmask();
   }
 
-  _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-    return simd8x64<bool>(this->chunks[0] == other.chunks[0],
+  _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+    return _simd8x64<bool>(this->chunks[0] == other.chunks[0],
                           this->chunks[1] == other.chunks[1],
                           this->chunks[2] == other.chunks[2],
                           this->chunks[3] == other.chunks[3])
@@ -30539,20 +32045,20 @@ template <typename T> struct simd8x64 {
   }
 
   _simdjson_inline uint64_t lteq(const T m) const {
-    const simd8<T> mask = simd8<T>::splat(m);
-    return simd8x64<bool>(this->chunks[0] <= mask, this->chunks[1] <= mask,
+    const _simd8<T> mask = _simd8<T>::splat(m);
+    return _simd8x64<bool>(this->chunks[0] <= mask, this->chunks[1] <= mask,
                           this->chunks[2] <= mask, this->chunks[3] <= mask)
         .to_bitmask();
   }
-}; // struct simd8x64<T>
+}; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace ppc64
 } // namespace _simdjson
 
-#endif // _SIMDJSON_PPC64_SIMD_INPUT_H
-/* end file _simdjson/ppc64/simd.h */
+#endif // _SIMDJSON_PPC64__SIMD_INPUT_H
+/* end file _simdjson/ppc64/_simd.h */
 /* including _simdjson/ppc64/stringparsing_defs.h: #include "_simdjson/ppc64/stringparsing_defs.h" */
 /* begin file _simdjson/ppc64/stringparsing_defs.h */
 #ifndef _SIMDJSON_PPC64_STRINGPARSING_DEFS_H
@@ -30561,20 +32067,20 @@ template <typename T> struct simd8x64 {
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/ppc64/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/ppc64/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/ppc64/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/ppc64/_simd.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace ppc64 {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote
+  _simdjson_inline backslash_and_quote
   copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() {
@@ -30599,8 +32105,8 @@ backslash_and_quote::copy_and_find(const uint8_t *src, uint8_t *dst) {
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1),
                 "backslash and quote finder must process fewer than "
                 "_SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v0(src);
-  simd8<uint8_t> v1(src + sizeof(v0));
+  _simd8<uint8_t> v0(src);
+  _simd8<uint8_t> v1(src + sizeof(v0));
   v0.store(dst);
   v1.store(dst + sizeof(v0));
 
@@ -30608,10 +32114,36 @@ backslash_and_quote::copy_and_find(const uint8_t *src, uint8_t *dst) {
   // PPC; therefore, we smash them together into a 64-byte mask and get the
   // bitmask from there.
   uint64_t bs_and_quote =
-      simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
+      _simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
   return {
       uint32_t(bs_and_quote),      // bs_bits
       uint32_t(bs_and_quote >> 32) // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    // We store it as a 64-bit bitmask even though we only need 16 bits.
+    uint64_t((is_backslash | is_quote | is_control).to_bitmask())
   };
 }
 
@@ -30667,8 +32199,8 @@ namespace _simdjson {
 namespace ppc64 {
 namespace {
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3);
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input);
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3);
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input);
 
 } // unnamed namespace
 } // namespace ppc64
@@ -30690,7 +32222,7 @@ namespace ppc64 {
 namespace {
 
 struct json_character_block {
-  static _simdjson_inline json_character_block classify(const simd::simd8x64<uint8_t>& in);
+  static _simdjson_inline json_character_block classify(const _simd::_simd8x64<uint8_t>& in);
 
   _simdjson_inline uint64_t whitespace() const noexcept { return _whitespace; }
   _simdjson_inline uint64_t op() const noexcept { return _op; }
@@ -30792,38 +32324,38 @@ private:
 
 // Routines to print masks and text for debugging bitmask operations
 _simdjson_unused static char * format_input_text_64(const uint8_t *text) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     buf[i] = int8_t(text[i]) < ' ' ? '_' : int8_t(text[i]);
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 // Routines to print masks and text for debugging bitmask operations
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] < ' ') { buf[i] = '_'; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in, uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in, uint64_t mask) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] <= ' ') { buf[i] = '_'; }
     if (!(mask & (size_t(1) << i))) { buf[i] = ' '; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 _simdjson_unused static char * format_mask(uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   for (size_t i=0; i<64; i++) {
     buf[i] = (mask & (size_t(1) << i)) ? 'X' : ' ';
   }
@@ -31065,7 +32597,7 @@ struct json_string_block {
 // Scans blocks for string characters, storing the state necessary to do so
 class json_string_scanner {
 public:
-  _simdjson_really_inline json_string_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_really_inline json_string_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
   _simdjson_really_inline error_code finish();
 
@@ -31084,7 +32616,7 @@ private:
 //
 // Backslash sequences outside of quotes will be detected in stage 2.
 //
-_simdjson_really_inline json_string_block json_string_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_really_inline json_string_block json_string_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   const uint64_t backslash = in.eq('\\');
   const uint64_t escaped = escape_scanner.next(backslash).escaped;
   const uint64_t quote = in.eq('"') & ~escaped;
@@ -31138,9 +32670,9 @@ namespace ppc64 {
 namespace {
 namespace utf8_validation {
 
-using namespace simd;
+using namespace _simd;
 
-  _simdjson_inline simd8<uint8_t> check_special_cases(const simd8<uint8_t> input, const simd8<uint8_t> prev1) {
+  _simdjson_inline _simd8<uint8_t> check_special_cases(const _simd8<uint8_t> input, const _simd8<uint8_t> prev1) {
 // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
 // Bit 1 = Too Long (ASCII followed by continuation)
 // Bit 2 = Overlong 3-byte
@@ -31168,7 +32700,7 @@ using namespace simd;
                                                 // 11111___ 1000____
     constexpr const uint8_t OVERLONG_4  = 1<<6; // 11110000 1000____
 
-    const simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
       // 0_______ ________ <ASCII in byte 1>
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
@@ -31184,7 +32716,7 @@ using namespace simd;
       TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4
     );
     constexpr const uint8_t CARRY = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-    const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
       // ____0000 ________
       CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
       // ____0001 ________
@@ -31212,7 +32744,7 @@ using namespace simd;
       CARRY | TOO_LARGE | TOO_LARGE_1000,
       CARRY | TOO_LARGE | TOO_LARGE_1000
     );
-    const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
       // ________ 0_______ <ASCII in byte 2>
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -31230,12 +32762,12 @@ using namespace simd;
     );
     return (byte_1_high & byte_1_low & byte_2_high);
   }
-  _simdjson_inline simd8<uint8_t> check_multibyte_lengths(const simd8<uint8_t> input,
-      const simd8<uint8_t> prev_input, const simd8<uint8_t> sc) {
-    simd8<uint8_t> prev2 = input.prev<2>(prev_input);
-    simd8<uint8_t> prev3 = input.prev<3>(prev_input);
-    simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
-    simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
+  _simdjson_inline _simd8<uint8_t> check_multibyte_lengths(const _simd8<uint8_t> input,
+      const _simd8<uint8_t> prev_input, const _simd8<uint8_t> sc) {
+    _simd8<uint8_t> prev2 = input.prev<2>(prev_input);
+    _simd8<uint8_t> prev3 = input.prev<3>(prev_input);
+    _simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
+    _simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
     return must23_80 ^ sc;
   }
 
@@ -31243,7 +32775,7 @@ using namespace simd;
   // Return nonzero if there are incomplete multibyte characters at the end of the block:
   // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
   //
-  _simdjson_inline simd8<uint8_t> is_incomplete(const simd8<uint8_t> input) {
+  _simdjson_inline _simd8<uint8_t> is_incomplete(const _simd8<uint8_t> input) {
     // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
     // ... 1111____ 111_____ 11______
 #if _SIMDJSON_IMPLEMENTATION_ICELAKE
@@ -31265,26 +32797,26 @@ using namespace simd;
       255, 255, 255, 255, 255, 0xf0u-1, 0xe0u-1, 0xc0u-1
     };
 #endif
-    const simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(simd8<uint8_t>)]);
+    const _simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(_simd8<uint8_t>)]);
     return input.gt_bits(max_value);
   }
 
   struct utf8_checker {
     // If this is nonzero, there has been a UTF-8 error.
-    simd8<uint8_t> error;
+    _simd8<uint8_t> error;
     // The last input we received
-    simd8<uint8_t> prev_input_block;
+    _simd8<uint8_t> prev_input_block;
     // Whether the last input we received was incomplete (used for ASCII fast path)
-    simd8<uint8_t> prev_incomplete;
+    _simd8<uint8_t> prev_incomplete;
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    _simdjson_inline void check_utf8_bytes(const simd8<uint8_t> input, const simd8<uint8_t> prev_input) {
+    _simdjson_inline void check_utf8_bytes(const _simd8<uint8_t> input, const _simd8<uint8_t> prev_input) {
       // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
       // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
-      simd8<uint8_t> prev1 = input.prev<1>(prev_input);
-      simd8<uint8_t> sc = check_special_cases(input, prev1);
+      _simd8<uint8_t> prev1 = input.prev<1>(prev_input);
+      _simd8<uint8_t> sc = check_special_cases(input, prev1);
       this->error |= check_multibyte_lengths(input, prev_input, sc);
     }
 
@@ -31297,32 +32829,32 @@ using namespace simd;
       this->error |= this->prev_incomplete;
     }
 
-    _simdjson_inline void check_next_input(const simd8x64<uint8_t>& input) {
+    _simdjson_inline void check_next_input(const _simd8x64<uint8_t>& input) {
       if(_simdjson_likely(is_ascii(input))) {
         this->error |= this->prev_incomplete;
       } else {
         // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
-        static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 1)
-                ||(simd8x64<uint8_t>::NUM_CHUNKS == 2)
-                || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
+        static_assert((_simd8x64<uint8_t>::NUM_CHUNKS == 1)
+                ||(_simd8x64<uint8_t>::NUM_CHUNKS == 2)
+                || (_simd8x64<uint8_t>::NUM_CHUNKS == 4),
                 "We support one, two or four chunks per 64-byte block.");
-        _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 1) {
+        _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 1) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 2) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 2) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 4) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 4) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
           this->check_utf8_bytes(input.chunks[2], input.chunks[1]);
           this->check_utf8_bytes(input.chunks[3], input.chunks[2]);
         }
-        this->prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
-        this->prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
+        this->prev_incomplete = is_incomplete(input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1]);
+        this->prev_input_block = input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1];
       }
     }
     // do not forget to call check_eof!
-    _simdjson_inline error_code errors() {
+    _simdjson_warn_unused _simdjson_inline error_code errors() {
       return this->error.any_bits_set_anywhere() ? error_code::UTF8_ERROR : error_code::SUCCESS;
     }
 
@@ -31445,9 +32977,9 @@ private:
 class json_scanner {
 public:
   json_scanner() = default;
-  _simdjson_inline json_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_inline json_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
-  _simdjson_inline error_code finish();
+  _simdjson_warn_unused _simdjson_inline error_code finish();
 
 private:
   // Whether the last character of the previous iteration is part of a scalar token
@@ -31470,7 +33002,7 @@ _simdjson_inline uint64_t follows(const uint64_t match, uint64_t &overflow) {
   return result;
 }
 
-_simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_block json_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   json_string_block strings = string_scanner.next(in);
   // identifies the white-space and the structural characters
   json_character_block characters = json_character_block::classify(in);
@@ -31495,7 +33027,7 @@ _simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in
   );
 }
 
-_simdjson_inline error_code json_scanner::finish() {
+_simdjson_warn_unused _simdjson_inline error_code json_scanner::finish() {
   return string_scanner.finish();
 }
 
@@ -31648,18 +33180,18 @@ private:
   {}
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block_buf, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block);
-  _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block);
+  _simdjson_warn_unused _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
   json_scanner scanner{};
   uint8_t *dst;
 };
 
-_simdjson_inline void json_minifier::next(const simd::simd8x64<uint8_t>& in, const json_block& block) {
+_simdjson_inline void json_minifier::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block) {
   uint64_t mask = block.whitespace();
   dst += in.compress(mask, dst);
 }
 
-_simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
+_simdjson_warn_unused _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
   error_code error = scanner.finish();
   if (error) { dst_len = 0; return error; }
   dst_len = dst - dst_start;
@@ -31668,8 +33200,8 @@ _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &ds
 
 template<>
 _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
-  simd::simd8x64<uint8_t> in_2(block_buf+64);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_2(block_buf+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1);
@@ -31679,7 +33211,7 @@ _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_blo
 
 template<>
 _simdjson_inline void json_minifier::step<64>(const uint8_t *block_buf, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
   json_block block_1 = scanner.next(in_1);
   this->next(block_buf, block_1);
   reader.advance();
@@ -31867,8 +33399,8 @@ private:
   _simdjson_inline json_structural_indexer(uint32_t *structural_indexes);
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx);
-  _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx);
+  _simdjson_warn_unused _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
 
   json_scanner scanner{};
   utf8_checker checker{};
@@ -31946,8 +33478,8 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
 
 template<>
 _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
-  simd::simd8x64<uint8_t> in_2(block+64);
+  _simd::_simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_2(block+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1, reader.block_index());
@@ -31957,13 +33489,13 @@ _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, b
 
 template<>
 _simdjson_inline void json_structural_indexer::step<64>(const uint8_t *block, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_1(block);
   json_block block_1 = scanner.next(in_1);
   this->next(in_1, block_1, reader.block_index());
   reader.advance();
 }
 
-_simdjson_inline void json_structural_indexer::next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
+_simdjson_inline void json_structural_indexer::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
   uint64_t unescaped = in.lteq(0x1F);
 #if _SIMDJSON_UTF8VALIDATION
   checker.check_next_input(in);
@@ -32108,13 +33640,13 @@ bool generic_validate_utf8(const uint8_t * input, size_t length) {
     checker c{};
     buf_block_reader<64> reader(input, length);
     while (reader.has_full_block()) {
-      simd::simd8x64<uint8_t> in(reader.full_block());
+      _simd::_simd8x64<uint8_t> in(reader.full_block());
       c.check_next_input(in);
       reader.advance();
     }
     uint8_t block[64]{};
     reader.get_remainder(block);
-    simd::simd8x64<uint8_t> in(block);
+    _simd::_simd8x64<uint8_t> in(block);
     c.check_next_input(in);
     reader.advance();
     c.check_eof();
@@ -32720,6 +34252,7 @@ _simdjson_warn_unused _simdjson_inline error_code json_iterator::visit_primitive
 /* end file generic/stage2/json_iterator.h for ppc64 */
 /* including generic/stage2/stringparsing.h for ppc64: #include <generic/stage2/stringparsing.h> */
 /* begin file generic/stage2/stringparsing.h for ppc64 */
+#include <cstdint>
 #ifndef _SIMDJSON_SRC_GENERIC_STAGE2_STRINGPARSING_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
@@ -32872,7 +34405,8 @@ _simdjson_inline bool handle_unicode_codepoint_wobbly(const uint8_t **src_ptr,
 _simdjson_warn_unused _simdjson_inline uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) {
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -32917,7 +34451,8 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
   // It is not ideal that this function is nearly identical to parse_string.
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -32959,6 +34494,7 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
 }
 
 } // namespace stringparsing
+
 } // unnamed namespace
 } // namespace ppc64
 } // namespace _simdjson
@@ -33356,27 +34892,27 @@ _simdjson_warn_unused error_code implementation::create_dom_parser_implementatio
 
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
-_simdjson_inline json_character_block json_character_block::classify(const simd::simd8x64<uint8_t>& in) {
-  const simd8<uint8_t> table1(16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0);
-  const simd8<uint8_t> table2(8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0);
+_simdjson_inline json_character_block json_character_block::classify(const _simd::_simd8x64<uint8_t>& in) {
+  const _simd8<uint8_t> table1(16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0);
+  const _simd8<uint8_t> table2(8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0);
 
-  simd8x64<uint8_t> v(
+  _simd8x64<uint8_t> v(
      (in.chunks[0] & 0xf).lookup_16(table1) & (in.chunks[0].shr<4>()).lookup_16(table2),
      (in.chunks[1] & 0xf).lookup_16(table1) & (in.chunks[1].shr<4>()).lookup_16(table2),
      (in.chunks[2] & 0xf).lookup_16(table1) & (in.chunks[2].shr<4>()).lookup_16(table2),
      (in.chunks[3] & 0xf).lookup_16(table1) & (in.chunks[3].shr<4>()).lookup_16(table2)
   );
 
-  uint64_t op = simd8x64<bool>(
+  uint64_t op = _simd8x64<bool>(
         v.chunks[0].any_bits_set(0x7),
         v.chunks[1].any_bits_set(0x7),
         v.chunks[2].any_bits_set(0x7),
         v.chunks[3].any_bits_set(0x7)
   ).to_bitmask();
 
-  uint64_t whitespace = simd8x64<bool>(
+  uint64_t whitespace = _simd8x64<bool>(
         v.chunks[0].any_bits_set(0x18),
         v.chunks[1].any_bits_set(0x18),
         v.chunks[2].any_bits_set(0x18),
@@ -33386,22 +34922,22 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   return { whitespace, op };
 }
 
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input) {
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input) {
   // careful: 0x80 is not ascii.
   return input.reduce_or().saturating_sub(0x7fu).bits_not_set_anywhere();
 }
 
-_simdjson_unused _simdjson_inline simd8<bool> must_be_continuation(const simd8<uint8_t> prev1, const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-  simd8<uint8_t> is_second_byte = prev1.saturating_sub(0xc0u-1); // Only 11______ will be > 0
-  simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-1); // Only 111_____ will be > 0
-  simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-1); // Only 1111____ will be > 0
+_simdjson_unused _simdjson_inline _simd8<bool> must_be_continuation(const _simd8<uint8_t> prev1, const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+  _simd8<uint8_t> is_second_byte = prev1.saturating_sub(0xc0u-1); // Only 11______ will be > 0
+  _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-1); // Only 111_____ will be > 0
+  _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-1); // Only 1111____ will be > 0
   // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
-  return simd8<int8_t>(is_second_byte | is_third_byte | is_fourth_byte) > int8_t(0);
+  return _simd8<int8_t>(is_second_byte | is_third_byte | is_fourth_byte) > int8_t(0);
 }
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-  simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
-  simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+  _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
+  _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
   return is_third_byte | is_fourth_byte;
 }
 
@@ -33432,25 +34968,29 @@ _simdjson_warn_unused error_code dom_parser_implementation::stage1(const uint8_t
 _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t len) const noexcept {
   return ppc64::stage1::generic_validate_utf8(buf,len);
 }
-_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool replacement_char) const noexcept {
-  return ppc64::stringparsing::parse_string(src, dst, replacement_char);
+
+_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
+    return ppc64::stringparsing::parse_string(src, dst, allow_replacement);
 }
+
+
+
 _simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return ppc64::atomparsing::is_valid_true_atom(src, len);
+    return ppc64::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return ppc64::atomparsing::is_valid_false_atom(src, len);
+    return ppc64::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return ppc64::atomparsing::is_valid_null_atom(src, len);
+    return ppc64::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return ppc64::numberparsing::parse_number(src, writer);
+    return ppc64::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::stage2(dom::document &_doc) noexcept {
@@ -33471,27 +35011,27 @@ _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_wobbly_string(co
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return ppc64::atomparsing::is_valid_true_atom(src, len);
+    return ppc64::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return ppc64::atomparsing::is_valid_false_atom(src, len);
+    return ppc64::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return ppc64::atomparsing::is_valid_null_atom(src, len);
+    return ppc64::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return ppc64::numberparsing::parse_number(src, writer);
+    return ppc64::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse(const uint8_t* _buf, size_t _len, dom::document& _doc, bool all) noexcept {
-  auto error = stage1(_buf, _len, stage1_mode::regular);
-  if (error) { return error; } if (!all) { return error_code(); }
-  return stage2(_doc);
+    auto error = stage1(_buf, _len, stage1_mode::regular);
+    if (error) { return error; } if (!all) { return error_code(); }
+    return stage2(_doc);
 }
 
 } // namespace ppc64
@@ -33549,12 +35089,12 @@ namespace westmere {
 class implementation;
 
 namespace {
-namespace simd {
+namespace _simd {
 
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace westmere
@@ -33740,12 +35280,12 @@ namespace westmere {
 class implementation;
 
 namespace {
-namespace simd {
+namespace _simd {
 
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace westmere
@@ -33842,21 +35382,21 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif //  _SIMDJSON_WESTMERE_NUMBERPARSING_DEFS_H
 /* end file _simdjson/westmere/numberparsing_defs.h */
-/* including _simdjson/westmere/simd.h: #include "_simdjson/westmere/simd.h" */
-/* begin file _simdjson/westmere/simd.h */
-#ifndef _SIMDJSON_WESTMERE_SIMD_H
-#define _SIMDJSON_WESTMERE_SIMD_H
+/* including _simdjson/westmere/_simd.h: #include "_simdjson/westmere/_simd.h" */
+/* begin file _simdjson/westmere/_simd.h */
+#ifndef _SIMDJSON_WESTMERE__SIMD_H
+#define _SIMDJSON_WESTMERE__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/westmere/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/westmere/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace westmere {
 namespace {
-namespace simd {
+namespace _simd {
 
   template<typename Child>
   struct base {
@@ -33865,10 +35405,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m128i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m128i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m128i&() const { return this->value; }
     _simdjson_inline operator __m128i&() { return this->value; }
 
@@ -33882,52 +35422,52 @@ namespace simd {
     _simdjson_inline Child& operator^=(const Child other) { auto this_cast = static_cast<Child*>(this); *this_cast = *this_cast ^ other; return *this_cast; }
   };
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
     typedef uint16_t bitmask_t;
     typedef uint32_t bitmask2_t;
 
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m128i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return _mm_cmpeq_epi8(lhs, rhs); }
+    friend _simdjson_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return _mm_cmpeq_epi8(lhs, rhs); }
 
-    static const int SIZE = sizeof(base<simd8<T>>::value);
+    static const int SIZE = sizeof(base<_simd8<T>>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return _mm_alignr_epi8(*this, prev_chunk, 16 - N);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return _mm_set1_epi8(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return _mm_set1_epi8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m128i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const { return _mm_movemask_epi8(*this); }
     _simdjson_inline bool any() const { return !_mm_testz_si128(*this, *this); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return _mm_set1_epi8(_value); }
-    static _simdjson_inline simd8<T> zero() { return _mm_setzero_si128(); }
-    static _simdjson_inline simd8<T> load(const T values[16]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return _mm_set1_epi8(_value); }
+    static _simdjson_inline _simd8<T> zero() { return _mm_setzero_si128(); }
+    static _simdjson_inline _simd8<T> load(const T values[16]) {
       return _mm_loadu_si128(reinterpret_cast<const __m128i *>(values));
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -33940,17 +35480,17 @@ namespace simd {
     _simdjson_inline void store(T dst[16]) const { return _mm_storeu_si128(reinterpret_cast<__m128i *>(dst), *this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return _mm_add_epi8(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return _mm_sub_epi8(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return _mm_add_epi8(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return _mm_sub_epi8(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return _mm_shuffle_epi8(lookup_table, *this);
     }
 
@@ -33959,7 +35499,7 @@ namespace simd {
     // Only the first 16 - count_ones(mask) bytes of the result are significant but 16 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint32_t mask) would be
+    // signature _simd8<L> compress(uint32_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint16_t mask, L * output) const {
@@ -33993,12 +35533,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -34009,97 +35549,97 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8(_mm_setr_epi8(
+    ) : _simd8(_mm_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return _mm_max_epi8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return _mm_min_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return _mm_cmpgt_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return _mm_cmpgt_epi8(other, *this); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return _mm_max_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return _mm_min_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return _mm_cmpgt_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return _mm_cmpgt_epi8(other, *this); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(_mm_setr_epi8(
+    ) : _simd8(_mm_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return _mm_adds_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return _mm_subs_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return _mm_adds_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return _mm_subs_epu8(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return _mm_max_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return _mm_min_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return _mm_max_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return _mm_min_epu8(*this, other); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const { return _mm_movemask_epi8(*this) == 0; }
     _simdjson_inline bool bits_not_set_anywhere() const { return _mm_testz_si128(*this, *this); }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return _mm_testz_si128(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const { return _mm_testz_si128(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
     // Get one of the bits and make a bitmask out of it.
     // e.g. value.get_bit<7>() gets the high bit
     template<int N>
@@ -34107,26 +35647,26 @@ namespace simd {
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 4, "Westmere kernel should use four registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1, const simd8<T> chunk2, const simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+16), simd8<T>::load(ptr+32), simd8<T>::load(ptr+48)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1, const _simd8<T> chunk2, const _simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+16), _simd8<T>::load(ptr+32), _simd8<T>::load(ptr+48)} {}
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
-      this->chunks[2].store(ptr+sizeof(simd8<T>)*2);
-      this->chunks[3].store(ptr+sizeof(simd8<T>)*3);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
+      this->chunks[2].store(ptr+sizeof(_simd8<T>)*2);
+      this->chunks[3].store(ptr+sizeof(_simd8<T>)*3);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return (this->chunks[0] | this->chunks[1]) | (this->chunks[2] | this->chunks[3]);
     }
 
@@ -34147,8 +35687,8 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask,
         this->chunks[2] == mask,
@@ -34156,8 +35696,8 @@ namespace simd {
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1],
         this->chunks[2] == other.chunks[2],
@@ -34166,23 +35706,23 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask,
         this->chunks[2] <= mask,
         this->chunks[3] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace westmere
 } // namespace _simdjson
 
-#endif // _SIMDJSON_WESTMERE_SIMD_INPUT_H
-/* end file _simdjson/westmere/simd.h */
+#endif // _SIMDJSON_WESTMERE__SIMD_INPUT_H
+/* end file _simdjson/westmere/_simd.h */
 /* including _simdjson/westmere/stringparsing_defs.h: #include "_simdjson/westmere/stringparsing_defs.h" */
 /* begin file _simdjson/westmere/stringparsing_defs.h */
 #ifndef _SIMDJSON_WESTMERE_STRINGPARSING_DEFS_H
@@ -34270,21 +35810,21 @@ _simdjson_inline bool add_overflow(uint64_t value1, uint64_t value2,
 
 #endif // _SIMDJSON_WESTMERE_BITMANIPULATION_H
 /* end file _simdjson/westmere/bitmanipulation.h */
-/* including _simdjson/westmere/simd.h: #include "_simdjson/westmere/simd.h" */
-/* begin file _simdjson/westmere/simd.h */
-#ifndef _SIMDJSON_WESTMERE_SIMD_H
-#define _SIMDJSON_WESTMERE_SIMD_H
+/* including _simdjson/westmere/_simd.h: #include "_simdjson/westmere/_simd.h" */
+/* begin file _simdjson/westmere/_simd.h */
+#ifndef _SIMDJSON_WESTMERE__SIMD_H
+#define _SIMDJSON_WESTMERE__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/westmere/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/westmere/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace westmere {
 namespace {
-namespace simd {
+namespace _simd {
 
   template<typename Child>
   struct base {
@@ -34293,10 +35833,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m128i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m128i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m128i&() const { return this->value; }
     _simdjson_inline operator __m128i&() { return this->value; }
 
@@ -34310,52 +35850,52 @@ namespace simd {
     _simdjson_inline Child& operator^=(const Child other) { auto this_cast = static_cast<Child*>(this); *this_cast = *this_cast ^ other; return *this_cast; }
   };
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
     typedef uint16_t bitmask_t;
     typedef uint32_t bitmask2_t;
 
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m128i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return _mm_cmpeq_epi8(lhs, rhs); }
+    friend _simdjson_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return _mm_cmpeq_epi8(lhs, rhs); }
 
-    static const int SIZE = sizeof(base<simd8<T>>::value);
+    static const int SIZE = sizeof(base<_simd8<T>>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return _mm_alignr_epi8(*this, prev_chunk, 16 - N);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return _mm_set1_epi8(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return _mm_set1_epi8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m128i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const { return _mm_movemask_epi8(*this); }
     _simdjson_inline bool any() const { return !_mm_testz_si128(*this, *this); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return _mm_set1_epi8(_value); }
-    static _simdjson_inline simd8<T> zero() { return _mm_setzero_si128(); }
-    static _simdjson_inline simd8<T> load(const T values[16]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return _mm_set1_epi8(_value); }
+    static _simdjson_inline _simd8<T> zero() { return _mm_setzero_si128(); }
+    static _simdjson_inline _simd8<T> load(const T values[16]) {
       return _mm_loadu_si128(reinterpret_cast<const __m128i *>(values));
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -34368,17 +35908,17 @@ namespace simd {
     _simdjson_inline void store(T dst[16]) const { return _mm_storeu_si128(reinterpret_cast<__m128i *>(dst), *this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return _mm_add_epi8(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return _mm_sub_epi8(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return _mm_add_epi8(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return _mm_sub_epi8(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return _mm_shuffle_epi8(lookup_table, *this);
     }
 
@@ -34387,7 +35927,7 @@ namespace simd {
     // Only the first 16 - count_ones(mask) bytes of the result are significant but 16 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint32_t mask) would be
+    // signature _simd8<L> compress(uint32_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint16_t mask, L * output) const {
@@ -34421,12 +35961,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -34437,97 +35977,97 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8(_mm_setr_epi8(
+    ) : _simd8(_mm_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return _mm_max_epi8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return _mm_min_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return _mm_cmpgt_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return _mm_cmpgt_epi8(other, *this); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return _mm_max_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return _mm_min_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return _mm_cmpgt_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return _mm_cmpgt_epi8(other, *this); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(_mm_setr_epi8(
+    ) : _simd8(_mm_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return _mm_adds_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return _mm_subs_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return _mm_adds_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return _mm_subs_epu8(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return _mm_max_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return _mm_min_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return _mm_max_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return _mm_min_epu8(*this, other); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const { return _mm_movemask_epi8(*this) == 0; }
     _simdjson_inline bool bits_not_set_anywhere() const { return _mm_testz_si128(*this, *this); }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return _mm_testz_si128(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const { return _mm_testz_si128(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
     // Get one of the bits and make a bitmask out of it.
     // e.g. value.get_bit<7>() gets the high bit
     template<int N>
@@ -34535,26 +36075,26 @@ namespace simd {
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 4, "Westmere kernel should use four registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1, const simd8<T> chunk2, const simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+16), simd8<T>::load(ptr+32), simd8<T>::load(ptr+48)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1, const _simd8<T> chunk2, const _simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+16), _simd8<T>::load(ptr+32), _simd8<T>::load(ptr+48)} {}
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
-      this->chunks[2].store(ptr+sizeof(simd8<T>)*2);
-      this->chunks[3].store(ptr+sizeof(simd8<T>)*3);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
+      this->chunks[2].store(ptr+sizeof(_simd8<T>)*2);
+      this->chunks[3].store(ptr+sizeof(_simd8<T>)*3);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return (this->chunks[0] | this->chunks[1]) | (this->chunks[2] | this->chunks[3]);
     }
 
@@ -34575,8 +36115,8 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask,
         this->chunks[2] == mask,
@@ -34584,8 +36124,8 @@ namespace simd {
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1],
         this->chunks[2] == other.chunks[2],
@@ -34594,35 +36134,35 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask,
         this->chunks[2] <= mask,
         this->chunks[3] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace westmere
 } // namespace _simdjson
 
-#endif // _SIMDJSON_WESTMERE_SIMD_INPUT_H
-/* end file _simdjson/westmere/simd.h */
+#endif // _SIMDJSON_WESTMERE__SIMD_INPUT_H
+/* end file _simdjson/westmere/_simd.h */
 
 namespace _simdjson {
 namespace westmere {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return bs_bits != 0; }
@@ -34637,14 +36177,39 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 31 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v0(src);
-  simd8<uint8_t> v1(src + 16);
+  _simd8<uint8_t> v0(src);
+  _simd8<uint8_t> v1(src + 16);
   v0.store(dst);
   v1.store(dst + 16);
-  uint64_t bs_and_quote = simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
+  uint64_t bs_and_quote = _simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
   return {
     uint32_t(bs_and_quote),      // bs_bits
     uint32_t(bs_and_quote >> 32) // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    uint64_t((is_backslash | is_quote | is_control).to_bitmask())
   };
 }
 
@@ -34941,19 +36506,23 @@ public:
   inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
   dom_parser_implementation(const dom_parser_implementation &) = delete;
   dom_parser_implementation &operator=(const dom_parser_implementation &) = delete;
-  virtual  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
 
-  virtual  _simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
-  virtual  _simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
-  virtual  _simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
+  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
+  _simdjson_warn_unused error_code stage1(const uint8_t* buf, size_t len, stage1_mode partial) noexcept final;
+  _simdjson_warn_unused error_code stage2(dom::document& doc) noexcept final;
+  _simdjson_warn_unused error_code stage2_next(dom::document& doc) noexcept final;
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept final;
+  _simdjson_warn_unused uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept final;
+
+
   _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
   _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
-  virtual  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
-  virtual  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
+  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
+  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
 private:
   _simdjson_inline _simdjson_warn_unused error_code set_capacity_stage1(size_t capacity);
 
@@ -35069,12 +36638,17 @@ struct implementation__simdjson_result_base {
    *
    * @param value The variable to assign the value to. May not be set if there is an error.
    */
-  _simdjson_inline error_code get(T &value) && noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
    * The error.
    */
-  _simdjson_inline error_code error() const noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code error() const noexcept;
+
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_warn_unused _simdjson_inline bool has_value() const noexcept;
 
 #if _SIMDJSON_EXCEPTIONS
 
@@ -35083,6 +36657,16 @@ struct implementation__simdjson_result_base {
    *
    * @throw _simdjson_error if there was an error.
    */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
+
   _simdjson_inline T& value() & noexcept(false);
 
   /**
@@ -35124,6 +36708,10 @@ struct implementation__simdjson_result_base {
    * the error() method returns a value that evaluates to false.
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
+
+  using value_type = T;
+  using error_type = error_code;
+
 protected:
   /** users should never directly access first and second. **/
   T first{}; /** Users should never directly access 'first'. **/
@@ -35306,7 +36894,12 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
   // with a returned value of type value128 with a "low component" corresponding to the
   // 64-bit least significant bits of the product and with a "high component" corresponding
   // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+  _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index]);
+#else
   _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index]);
+#endif
+
   // Both i and power_of_five_128[index] have their most significant bit set to 1 which
   // implies that the either the most or the second most significant bit of the product
   // is 1. We pack values in this manner for efficiency reasons: it maximizes the use
@@ -35339,7 +36932,11 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
     // with a returned value of type value128 with a "low component" corresponding to the
     // 64-bit least significant bits of the product and with a "high component" corresponding
     // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+    _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index + 1]);
+#else
     _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index + 1]);
+#endif
     firstproduct.low += secondproduct.high;
     if(secondproduct.high > firstproduct.low) { firstproduct.high++; }
     // As it has been proven by Noble Mushtak and Daniel Lemire in "Fast Number Parsing Without
@@ -35500,7 +37097,7 @@ _simdjson_inline bool is_digit(const uint8_t c) {
   return static_cast<uint8_t>(c - '0') <= 9;
 }
 
-_simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
   // we continue with the fiction that we have an integer. If the
   // floating point number is representable as x * 10^z for some integer
   // z that fits in 53 bits, then we will be able to convert back the
@@ -35528,7 +37125,7 @@ _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const
   return SUCCESS;
 }
 
-_simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
   // Exp Sign: -123.456e[-]78
   bool neg_exp = ('-' == *p);
   if (neg_exp || '+' == *p) { p++; } // Skip + as well
@@ -35617,7 +37214,7 @@ static error_code slow_float_parsing(_simdjson_unused const uint8_t * src, doubl
 
 /** @private */
 template<typename W>
-_simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
   // If we frequently had to deal with long strings of digits,
   // we could extend our code by using a 128-bit integer instead
   // of a 64-bit integer. However, this is uncommon in practice.
@@ -35680,13 +37277,13 @@ _simdjson_inline error_code write_float(const uint8_t *const src, bool negative,
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
 
 // for performance analysis, it is sometimes  useful to skip parsing
 #ifdef _SIMDJSON_SKIPNUMBERPARSING
 
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
   writer.append_s64(0);        // always write zero
   return SUCCESS;              // always succeeds
 }
@@ -35712,7 +37309,7 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   //
   // Check for minus sign
   //
@@ -35786,7 +37383,16 @@ _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   if (i > uint64_t(INT64_MAX)) {
     WRITE_UNSIGNED(i, src, writer);
   } else {
-    WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+    if(i == 0 && negative) {
+      // We have to write -0.0 instead of 0
+      WRITE_DOUBLE(-0.0, src, writer);
+    } else {
+      WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+    }
+#else
+  WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#endif
   }
   if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return INVALID_NUMBER(src); }
   return SUCCESS;
@@ -36247,6 +37853,12 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
       if (_simdjson_unlikely(digit_count == 19 && memcmp(src, smaller_big_integer, 19) > 0)) {
         return number_type::big_integer;
       }
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+      if(digit_count == 1 && src[0] == '0') {
+        // We have to write -0.0 instead of 0
+        return number_type::floating_point_number;
+      }
+#endif
       return number_type::signed_integer;
     }
     // Let us check if we have a big integer (>=2**64).
@@ -36481,11 +38093,40 @@ _simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_resul
 }
 
 template<typename T>
-_simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
+_simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_warn_unused _simdjson_inline bool implementation__simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+template<typename T>
+_simdjson_inline T& implementation__simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& implementation__simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<implementation__simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* implementation__simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* implementation__simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& implementation__simdjson_result_base<T>::value() & noexcept(false) {
@@ -36586,13 +38227,14 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
+};
 
 } // namespace westmere
 } // namespace _simdjson
@@ -36623,12 +38265,12 @@ namespace westmere {
 class implementation;
 
 namespace {
-namespace simd {
+namespace _simd {
 
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace westmere
@@ -36814,12 +38456,12 @@ namespace westmere {
 class implementation;
 
 namespace {
-namespace simd {
+namespace _simd {
 
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace westmere
@@ -36916,21 +38558,21 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif //  _SIMDJSON_WESTMERE_NUMBERPARSING_DEFS_H
 /* end file _simdjson/westmere/numberparsing_defs.h */
-/* including _simdjson/westmere/simd.h: #include "_simdjson/westmere/simd.h" */
-/* begin file _simdjson/westmere/simd.h */
-#ifndef _SIMDJSON_WESTMERE_SIMD_H
-#define _SIMDJSON_WESTMERE_SIMD_H
+/* including _simdjson/westmere/_simd.h: #include "_simdjson/westmere/_simd.h" */
+/* begin file _simdjson/westmere/_simd.h */
+#ifndef _SIMDJSON_WESTMERE__SIMD_H
+#define _SIMDJSON_WESTMERE__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/westmere/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/westmere/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace westmere {
 namespace {
-namespace simd {
+namespace _simd {
 
   template<typename Child>
   struct base {
@@ -36939,10 +38581,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m128i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m128i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m128i&() const { return this->value; }
     _simdjson_inline operator __m128i&() { return this->value; }
 
@@ -36956,52 +38598,52 @@ namespace simd {
     _simdjson_inline Child& operator^=(const Child other) { auto this_cast = static_cast<Child*>(this); *this_cast = *this_cast ^ other; return *this_cast; }
   };
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
     typedef uint16_t bitmask_t;
     typedef uint32_t bitmask2_t;
 
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m128i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return _mm_cmpeq_epi8(lhs, rhs); }
+    friend _simdjson_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return _mm_cmpeq_epi8(lhs, rhs); }
 
-    static const int SIZE = sizeof(base<simd8<T>>::value);
+    static const int SIZE = sizeof(base<_simd8<T>>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return _mm_alignr_epi8(*this, prev_chunk, 16 - N);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return _mm_set1_epi8(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return _mm_set1_epi8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m128i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const { return _mm_movemask_epi8(*this); }
     _simdjson_inline bool any() const { return !_mm_testz_si128(*this, *this); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return _mm_set1_epi8(_value); }
-    static _simdjson_inline simd8<T> zero() { return _mm_setzero_si128(); }
-    static _simdjson_inline simd8<T> load(const T values[16]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return _mm_set1_epi8(_value); }
+    static _simdjson_inline _simd8<T> zero() { return _mm_setzero_si128(); }
+    static _simdjson_inline _simd8<T> load(const T values[16]) {
       return _mm_loadu_si128(reinterpret_cast<const __m128i *>(values));
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -37014,17 +38656,17 @@ namespace simd {
     _simdjson_inline void store(T dst[16]) const { return _mm_storeu_si128(reinterpret_cast<__m128i *>(dst), *this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return _mm_add_epi8(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return _mm_sub_epi8(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return _mm_add_epi8(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return _mm_sub_epi8(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return _mm_shuffle_epi8(lookup_table, *this);
     }
 
@@ -37033,7 +38675,7 @@ namespace simd {
     // Only the first 16 - count_ones(mask) bytes of the result are significant but 16 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint32_t mask) would be
+    // signature _simd8<L> compress(uint32_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint16_t mask, L * output) const {
@@ -37067,12 +38709,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -37083,97 +38725,97 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8(_mm_setr_epi8(
+    ) : _simd8(_mm_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return _mm_max_epi8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return _mm_min_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return _mm_cmpgt_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return _mm_cmpgt_epi8(other, *this); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return _mm_max_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return _mm_min_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return _mm_cmpgt_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return _mm_cmpgt_epi8(other, *this); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(_mm_setr_epi8(
+    ) : _simd8(_mm_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return _mm_adds_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return _mm_subs_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return _mm_adds_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return _mm_subs_epu8(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return _mm_max_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return _mm_min_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return _mm_max_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return _mm_min_epu8(*this, other); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const { return _mm_movemask_epi8(*this) == 0; }
     _simdjson_inline bool bits_not_set_anywhere() const { return _mm_testz_si128(*this, *this); }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return _mm_testz_si128(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const { return _mm_testz_si128(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
     // Get one of the bits and make a bitmask out of it.
     // e.g. value.get_bit<7>() gets the high bit
     template<int N>
@@ -37181,26 +38823,26 @@ namespace simd {
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 4, "Westmere kernel should use four registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1, const simd8<T> chunk2, const simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+16), simd8<T>::load(ptr+32), simd8<T>::load(ptr+48)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1, const _simd8<T> chunk2, const _simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+16), _simd8<T>::load(ptr+32), _simd8<T>::load(ptr+48)} {}
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
-      this->chunks[2].store(ptr+sizeof(simd8<T>)*2);
-      this->chunks[3].store(ptr+sizeof(simd8<T>)*3);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
+      this->chunks[2].store(ptr+sizeof(_simd8<T>)*2);
+      this->chunks[3].store(ptr+sizeof(_simd8<T>)*3);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return (this->chunks[0] | this->chunks[1]) | (this->chunks[2] | this->chunks[3]);
     }
 
@@ -37221,8 +38863,8 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask,
         this->chunks[2] == mask,
@@ -37230,8 +38872,8 @@ namespace simd {
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1],
         this->chunks[2] == other.chunks[2],
@@ -37240,23 +38882,23 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask,
         this->chunks[2] <= mask,
         this->chunks[3] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace westmere
 } // namespace _simdjson
 
-#endif // _SIMDJSON_WESTMERE_SIMD_INPUT_H
-/* end file _simdjson/westmere/simd.h */
+#endif // _SIMDJSON_WESTMERE__SIMD_INPUT_H
+/* end file _simdjson/westmere/_simd.h */
 /* including _simdjson/westmere/stringparsing_defs.h: #include "_simdjson/westmere/stringparsing_defs.h" */
 /* begin file _simdjson/westmere/stringparsing_defs.h */
 #ifndef _SIMDJSON_WESTMERE_STRINGPARSING_DEFS_H
@@ -37344,21 +38986,21 @@ _simdjson_inline bool add_overflow(uint64_t value1, uint64_t value2,
 
 #endif // _SIMDJSON_WESTMERE_BITMANIPULATION_H
 /* end file _simdjson/westmere/bitmanipulation.h */
-/* including _simdjson/westmere/simd.h: #include "_simdjson/westmere/simd.h" */
-/* begin file _simdjson/westmere/simd.h */
-#ifndef _SIMDJSON_WESTMERE_SIMD_H
-#define _SIMDJSON_WESTMERE_SIMD_H
+/* including _simdjson/westmere/_simd.h: #include "_simdjson/westmere/_simd.h" */
+/* begin file _simdjson/westmere/_simd.h */
+#ifndef _SIMDJSON_WESTMERE__SIMD_H
+#define _SIMDJSON_WESTMERE__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/westmere/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/westmere/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace westmere {
 namespace {
-namespace simd {
+namespace _simd {
 
   template<typename Child>
   struct base {
@@ -37367,10 +39009,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m128i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m128i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m128i&() const { return this->value; }
     _simdjson_inline operator __m128i&() { return this->value; }
 
@@ -37384,52 +39026,52 @@ namespace simd {
     _simdjson_inline Child& operator^=(const Child other) { auto this_cast = static_cast<Child*>(this); *this_cast = *this_cast ^ other; return *this_cast; }
   };
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
     typedef uint16_t bitmask_t;
     typedef uint32_t bitmask2_t;
 
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m128i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return _mm_cmpeq_epi8(lhs, rhs); }
+    friend _simdjson_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return _mm_cmpeq_epi8(lhs, rhs); }
 
-    static const int SIZE = sizeof(base<simd8<T>>::value);
+    static const int SIZE = sizeof(base<_simd8<T>>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return _mm_alignr_epi8(*this, prev_chunk, 16 - N);
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return _mm_set1_epi8(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return _mm_set1_epi8(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m128i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const { return _mm_movemask_epi8(*this); }
     _simdjson_inline bool any() const { return !_mm_testz_si128(*this, *this); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return _mm_set1_epi8(_value); }
-    static _simdjson_inline simd8<T> zero() { return _mm_setzero_si128(); }
-    static _simdjson_inline simd8<T> load(const T values[16]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return _mm_set1_epi8(_value); }
+    static _simdjson_inline _simd8<T> zero() { return _mm_setzero_si128(); }
+    static _simdjson_inline _simd8<T> load(const T values[16]) {
       return _mm_loadu_si128(reinterpret_cast<const __m128i *>(values));
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -37442,17 +39084,17 @@ namespace simd {
     _simdjson_inline void store(T dst[16]) const { return _mm_storeu_si128(reinterpret_cast<__m128i *>(dst), *this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return _mm_add_epi8(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return _mm_sub_epi8(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return _mm_add_epi8(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return _mm_sub_epi8(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return _mm_shuffle_epi8(lookup_table, *this);
     }
 
@@ -37461,7 +39103,7 @@ namespace simd {
     // Only the first 16 - count_ones(mask) bytes of the result are significant but 16 bytes
     // get written.
     // Design consideration: it seems like a function with the
-    // signature simd8<L> compress(uint32_t mask) would be
+    // signature _simd8<L> compress(uint32_t mask) would be
     // sensible, but the AVX ISA makes this kind of approach difficult.
     template<typename L>
     _simdjson_inline void compress(uint16_t mask, L * output) const {
@@ -37495,12 +39137,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -37511,97 +39153,97 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8(_mm_setr_epi8(
+    ) : _simd8(_mm_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return _mm_max_epi8(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return _mm_min_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return _mm_cmpgt_epi8(*this, other); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return _mm_cmpgt_epi8(other, *this); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return _mm_max_epi8(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return _mm_min_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return _mm_cmpgt_epi8(*this, other); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return _mm_cmpgt_epi8(other, *this); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t* values) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t* values) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(_mm_setr_epi8(
+    ) : _simd8(_mm_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     )) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return _mm_adds_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return _mm_subs_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return _mm_adds_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return _mm_subs_epu8(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return _mm_max_epu8(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return _mm_min_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return _mm_max_epu8(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return _mm_min_epu8(*this, other); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const { return _mm_movemask_epi8(*this) == 0; }
     _simdjson_inline bool bits_not_set_anywhere() const { return _mm_testz_si128(*this, *this); }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return _mm_testz_si128(*this, bits); }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const { return _mm_testz_si128(*this, bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
     // Get one of the bits and make a bitmask out of it.
     // e.g. value.get_bit<7>() gets the high bit
     template<int N>
@@ -37609,26 +39251,26 @@ namespace simd {
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 4, "Westmere kernel should use four registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1, const simd8<T> chunk2, const simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+16), simd8<T>::load(ptr+32), simd8<T>::load(ptr+48)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1, const _simd8<T> chunk2, const _simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+16), _simd8<T>::load(ptr+32), _simd8<T>::load(ptr+48)} {}
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
-      this->chunks[2].store(ptr+sizeof(simd8<T>)*2);
-      this->chunks[3].store(ptr+sizeof(simd8<T>)*3);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
+      this->chunks[2].store(ptr+sizeof(_simd8<T>)*2);
+      this->chunks[3].store(ptr+sizeof(_simd8<T>)*3);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return (this->chunks[0] | this->chunks[1]) | (this->chunks[2] | this->chunks[3]);
     }
 
@@ -37649,8 +39291,8 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask,
         this->chunks[2] == mask,
@@ -37658,8 +39300,8 @@ namespace simd {
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1],
         this->chunks[2] == other.chunks[2],
@@ -37668,35 +39310,35 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask,
         this->chunks[2] <= mask,
         this->chunks[3] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace westmere
 } // namespace _simdjson
 
-#endif // _SIMDJSON_WESTMERE_SIMD_INPUT_H
-/* end file _simdjson/westmere/simd.h */
+#endif // _SIMDJSON_WESTMERE__SIMD_INPUT_H
+/* end file _simdjson/westmere/_simd.h */
 
 namespace _simdjson {
 namespace westmere {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return bs_bits != 0; }
@@ -37711,14 +39353,39 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 31 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v0(src);
-  simd8<uint8_t> v1(src + 16);
+  _simd8<uint8_t> v0(src);
+  _simd8<uint8_t> v1(src + 16);
   v0.store(dst);
   v1.store(dst + 16);
-  uint64_t bs_and_quote = simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
+  uint64_t bs_and_quote = _simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
   return {
     uint32_t(bs_and_quote),      // bs_bits
     uint32_t(bs_and_quote >> 32) // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    uint64_t((is_backslash | is_quote | is_control).to_bitmask())
   };
 }
 
@@ -37772,8 +39439,8 @@ namespace _simdjson {
 namespace westmere {
 namespace {
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3);
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input);
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3);
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input);
 
 } // unnamed namespace
 } // namespace westmere
@@ -37795,7 +39462,7 @@ namespace westmere {
 namespace {
 
 struct json_character_block {
-  static _simdjson_inline json_character_block classify(const simd::simd8x64<uint8_t>& in);
+  static _simdjson_inline json_character_block classify(const _simd::_simd8x64<uint8_t>& in);
 
   _simdjson_inline uint64_t whitespace() const noexcept { return _whitespace; }
   _simdjson_inline uint64_t op() const noexcept { return _op; }
@@ -37897,38 +39564,38 @@ private:
 
 // Routines to print masks and text for debugging bitmask operations
 _simdjson_unused static char * format_input_text_64(const uint8_t *text) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     buf[i] = int8_t(text[i]) < ' ' ? '_' : int8_t(text[i]);
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 // Routines to print masks and text for debugging bitmask operations
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] < ' ') { buf[i] = '_'; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in, uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in, uint64_t mask) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] <= ' ') { buf[i] = '_'; }
     if (!(mask & (size_t(1) << i))) { buf[i] = ' '; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 _simdjson_unused static char * format_mask(uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   for (size_t i=0; i<64; i++) {
     buf[i] = (mask & (size_t(1) << i)) ? 'X' : ' ';
   }
@@ -38170,7 +39837,7 @@ struct json_string_block {
 // Scans blocks for string characters, storing the state necessary to do so
 class json_string_scanner {
 public:
-  _simdjson_really_inline json_string_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_really_inline json_string_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
   _simdjson_really_inline error_code finish();
 
@@ -38189,7 +39856,7 @@ private:
 //
 // Backslash sequences outside of quotes will be detected in stage 2.
 //
-_simdjson_really_inline json_string_block json_string_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_really_inline json_string_block json_string_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   const uint64_t backslash = in.eq('\\');
   const uint64_t escaped = escape_scanner.next(backslash).escaped;
   const uint64_t quote = in.eq('"') & ~escaped;
@@ -38243,9 +39910,9 @@ namespace westmere {
 namespace {
 namespace utf8_validation {
 
-using namespace simd;
+using namespace _simd;
 
-  _simdjson_inline simd8<uint8_t> check_special_cases(const simd8<uint8_t> input, const simd8<uint8_t> prev1) {
+  _simdjson_inline _simd8<uint8_t> check_special_cases(const _simd8<uint8_t> input, const _simd8<uint8_t> prev1) {
 // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
 // Bit 1 = Too Long (ASCII followed by continuation)
 // Bit 2 = Overlong 3-byte
@@ -38273,7 +39940,7 @@ using namespace simd;
                                                 // 11111___ 1000____
     constexpr const uint8_t OVERLONG_4  = 1<<6; // 11110000 1000____
 
-    const simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
       // 0_______ ________ <ASCII in byte 1>
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
@@ -38289,7 +39956,7 @@ using namespace simd;
       TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4
     );
     constexpr const uint8_t CARRY = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-    const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
       // ____0000 ________
       CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
       // ____0001 ________
@@ -38317,7 +39984,7 @@ using namespace simd;
       CARRY | TOO_LARGE | TOO_LARGE_1000,
       CARRY | TOO_LARGE | TOO_LARGE_1000
     );
-    const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
       // ________ 0_______ <ASCII in byte 2>
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -38335,12 +40002,12 @@ using namespace simd;
     );
     return (byte_1_high & byte_1_low & byte_2_high);
   }
-  _simdjson_inline simd8<uint8_t> check_multibyte_lengths(const simd8<uint8_t> input,
-      const simd8<uint8_t> prev_input, const simd8<uint8_t> sc) {
-    simd8<uint8_t> prev2 = input.prev<2>(prev_input);
-    simd8<uint8_t> prev3 = input.prev<3>(prev_input);
-    simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
-    simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
+  _simdjson_inline _simd8<uint8_t> check_multibyte_lengths(const _simd8<uint8_t> input,
+      const _simd8<uint8_t> prev_input, const _simd8<uint8_t> sc) {
+    _simd8<uint8_t> prev2 = input.prev<2>(prev_input);
+    _simd8<uint8_t> prev3 = input.prev<3>(prev_input);
+    _simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
+    _simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
     return must23_80 ^ sc;
   }
 
@@ -38348,7 +40015,7 @@ using namespace simd;
   // Return nonzero if there are incomplete multibyte characters at the end of the block:
   // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
   //
-  _simdjson_inline simd8<uint8_t> is_incomplete(const simd8<uint8_t> input) {
+  _simdjson_inline _simd8<uint8_t> is_incomplete(const _simd8<uint8_t> input) {
     // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
     // ... 1111____ 111_____ 11______
 #if _SIMDJSON_IMPLEMENTATION_ICELAKE
@@ -38370,26 +40037,26 @@ using namespace simd;
       255, 255, 255, 255, 255, 0xf0u-1, 0xe0u-1, 0xc0u-1
     };
 #endif
-    const simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(simd8<uint8_t>)]);
+    const _simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(_simd8<uint8_t>)]);
     return input.gt_bits(max_value);
   }
 
   struct utf8_checker {
     // If this is nonzero, there has been a UTF-8 error.
-    simd8<uint8_t> error;
+    _simd8<uint8_t> error;
     // The last input we received
-    simd8<uint8_t> prev_input_block;
+    _simd8<uint8_t> prev_input_block;
     // Whether the last input we received was incomplete (used for ASCII fast path)
-    simd8<uint8_t> prev_incomplete;
+    _simd8<uint8_t> prev_incomplete;
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    _simdjson_inline void check_utf8_bytes(const simd8<uint8_t> input, const simd8<uint8_t> prev_input) {
+    _simdjson_inline void check_utf8_bytes(const _simd8<uint8_t> input, const _simd8<uint8_t> prev_input) {
       // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
       // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
-      simd8<uint8_t> prev1 = input.prev<1>(prev_input);
-      simd8<uint8_t> sc = check_special_cases(input, prev1);
+      _simd8<uint8_t> prev1 = input.prev<1>(prev_input);
+      _simd8<uint8_t> sc = check_special_cases(input, prev1);
       this->error |= check_multibyte_lengths(input, prev_input, sc);
     }
 
@@ -38402,32 +40069,32 @@ using namespace simd;
       this->error |= this->prev_incomplete;
     }
 
-    _simdjson_inline void check_next_input(const simd8x64<uint8_t>& input) {
+    _simdjson_inline void check_next_input(const _simd8x64<uint8_t>& input) {
       if(_simdjson_likely(is_ascii(input))) {
         this->error |= this->prev_incomplete;
       } else {
         // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
-        static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 1)
-                ||(simd8x64<uint8_t>::NUM_CHUNKS == 2)
-                || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
+        static_assert((_simd8x64<uint8_t>::NUM_CHUNKS == 1)
+                ||(_simd8x64<uint8_t>::NUM_CHUNKS == 2)
+                || (_simd8x64<uint8_t>::NUM_CHUNKS == 4),
                 "We support one, two or four chunks per 64-byte block.");
-        _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 1) {
+        _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 1) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 2) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 2) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 4) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 4) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
           this->check_utf8_bytes(input.chunks[2], input.chunks[1]);
           this->check_utf8_bytes(input.chunks[3], input.chunks[2]);
         }
-        this->prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
-        this->prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
+        this->prev_incomplete = is_incomplete(input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1]);
+        this->prev_input_block = input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1];
       }
     }
     // do not forget to call check_eof!
-    _simdjson_inline error_code errors() {
+    _simdjson_warn_unused _simdjson_inline error_code errors() {
       return this->error.any_bits_set_anywhere() ? error_code::UTF8_ERROR : error_code::SUCCESS;
     }
 
@@ -38550,9 +40217,9 @@ private:
 class json_scanner {
 public:
   json_scanner() = default;
-  _simdjson_inline json_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_inline json_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
-  _simdjson_inline error_code finish();
+  _simdjson_warn_unused _simdjson_inline error_code finish();
 
 private:
   // Whether the last character of the previous iteration is part of a scalar token
@@ -38575,7 +40242,7 @@ _simdjson_inline uint64_t follows(const uint64_t match, uint64_t &overflow) {
   return result;
 }
 
-_simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_block json_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   json_string_block strings = string_scanner.next(in);
   // identifies the white-space and the structural characters
   json_character_block characters = json_character_block::classify(in);
@@ -38600,7 +40267,7 @@ _simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in
   );
 }
 
-_simdjson_inline error_code json_scanner::finish() {
+_simdjson_warn_unused _simdjson_inline error_code json_scanner::finish() {
   return string_scanner.finish();
 }
 
@@ -38753,18 +40420,18 @@ private:
   {}
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block_buf, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block);
-  _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block);
+  _simdjson_warn_unused _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
   json_scanner scanner{};
   uint8_t *dst;
 };
 
-_simdjson_inline void json_minifier::next(const simd::simd8x64<uint8_t>& in, const json_block& block) {
+_simdjson_inline void json_minifier::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block) {
   uint64_t mask = block.whitespace();
   dst += in.compress(mask, dst);
 }
 
-_simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
+_simdjson_warn_unused _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
   error_code error = scanner.finish();
   if (error) { dst_len = 0; return error; }
   dst_len = dst - dst_start;
@@ -38773,8 +40440,8 @@ _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &ds
 
 template<>
 _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
-  simd::simd8x64<uint8_t> in_2(block_buf+64);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_2(block_buf+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1);
@@ -38784,7 +40451,7 @@ _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_blo
 
 template<>
 _simdjson_inline void json_minifier::step<64>(const uint8_t *block_buf, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
   json_block block_1 = scanner.next(in_1);
   this->next(block_buf, block_1);
   reader.advance();
@@ -38972,8 +40639,8 @@ private:
   _simdjson_inline json_structural_indexer(uint32_t *structural_indexes);
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx);
-  _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx);
+  _simdjson_warn_unused _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
 
   json_scanner scanner{};
   utf8_checker checker{};
@@ -39051,8 +40718,8 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
 
 template<>
 _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
-  simd::simd8x64<uint8_t> in_2(block+64);
+  _simd::_simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_2(block+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1, reader.block_index());
@@ -39062,13 +40729,13 @@ _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, b
 
 template<>
 _simdjson_inline void json_structural_indexer::step<64>(const uint8_t *block, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_1(block);
   json_block block_1 = scanner.next(in_1);
   this->next(in_1, block_1, reader.block_index());
   reader.advance();
 }
 
-_simdjson_inline void json_structural_indexer::next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
+_simdjson_inline void json_structural_indexer::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
   uint64_t unescaped = in.lteq(0x1F);
 #if _SIMDJSON_UTF8VALIDATION
   checker.check_next_input(in);
@@ -39213,13 +40880,13 @@ bool generic_validate_utf8(const uint8_t * input, size_t length) {
     checker c{};
     buf_block_reader<64> reader(input, length);
     while (reader.has_full_block()) {
-      simd::simd8x64<uint8_t> in(reader.full_block());
+      _simd::_simd8x64<uint8_t> in(reader.full_block());
       c.check_next_input(in);
       reader.advance();
     }
     uint8_t block[64]{};
     reader.get_remainder(block);
-    simd::simd8x64<uint8_t> in(block);
+    _simd::_simd8x64<uint8_t> in(block);
     c.check_next_input(in);
     reader.advance();
     c.check_eof();
@@ -39825,6 +41492,7 @@ _simdjson_warn_unused _simdjson_inline error_code json_iterator::visit_primitive
 /* end file generic/stage2/json_iterator.h for westmere */
 /* including generic/stage2/stringparsing.h for westmere: #include <generic/stage2/stringparsing.h> */
 /* begin file generic/stage2/stringparsing.h for westmere */
+#include <cstdint>
 #ifndef _SIMDJSON_SRC_GENERIC_STAGE2_STRINGPARSING_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
@@ -39977,7 +41645,8 @@ _simdjson_inline bool handle_unicode_codepoint_wobbly(const uint8_t **src_ptr,
 _simdjson_warn_unused _simdjson_inline uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) {
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -40022,7 +41691,8 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
   // It is not ideal that this function is nearly identical to parse_string.
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -40064,6 +41734,7 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
 }
 
 } // namespace stringparsing
+
 } // unnamed namespace
 } // namespace westmere
 } // namespace _simdjson
@@ -40462,12 +42133,12 @@ _simdjson_warn_unused error_code implementation::create_dom_parser_implementatio
 
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
-_simdjson_inline json_character_block json_character_block::classify(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_character_block json_character_block::classify(const _simd::_simd8x64<uint8_t>& in) {
   // These lookups rely on the fact that anything < 127 will match the lower 4 bits, which is why
   // we can't use the generic lookup_16.
-  auto whitespace_table = simd8<uint8_t>::repeat_16(' ', 100, 100, 100, 17, 100, 113, 2, 100, '\t', '\n', 112, 100, '\r', 100, 100);
+  auto whitespace_table = _simd8<uint8_t>::repeat_16(' ', 100, 100, 100, 17, 100, 113, 2, 100, '\t', '\n', 112, 100, '\r', 100, 100);
 
   // The 6 operators (:,[]{}) have these values:
   //
@@ -40479,7 +42150,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   // } 7D
   //
   // If you use | 0x20 to turn [ and ] into { and }, the lower 4 bits of each character is unique.
-  // We exploit this, using a simd 4-bit lookup to tell us which character match against, and then
+  // We exploit this, using a _simd 4-bit lookup to tell us which character match against, and then
   // match it (against | 0x20).
   //
   // To prevent recognizing other characters, everything else gets compared with 0, which cannot
@@ -40488,7 +42159,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   // NOTE: Due to the | 0x20, this ALSO treats <FF> and <SUB> (control characters 0C and 1A) like ,
   // and :. This gets caught in stage 2, which checks the actual character to ensure the right
   // operators are in the right places.
-  const auto op_table = simd8<uint8_t>::repeat_16(
+  const auto op_table = _simd8<uint8_t>::repeat_16(
     0, 0, 0, 0,
     0, 0, 0, 0,
     0, 0, ':', '{', // : = 3A, [ = 5B, { = 7B
@@ -40508,7 +42179,7 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
     _mm_shuffle_epi8(whitespace_table, in.chunks[3])
   });
   // Turn [ and ] into { and }
-  const simd8x64<uint8_t> curlified{
+  const _simd8x64<uint8_t> curlified{
     in.chunks[0] | 0x20,
     in.chunks[1] | 0x20,
     in.chunks[2] | 0x20,
@@ -40523,21 +42194,21 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
     return { whitespace, op };
 }
 
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input) {
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input) {
   return input.reduce_or().is_ascii();
 }
 
-_simdjson_unused _simdjson_inline simd8<bool> must_be_continuation(const simd8<uint8_t> prev1, const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-  simd8<uint8_t> is_second_byte = prev1.saturating_sub(0xc0u-1); // Only 11______ will be > 0
-  simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-1); // Only 111_____ will be > 0
-  simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-1); // Only 1111____ will be > 0
+_simdjson_unused _simdjson_inline _simd8<bool> must_be_continuation(const _simd8<uint8_t> prev1, const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+  _simd8<uint8_t> is_second_byte = prev1.saturating_sub(0xc0u-1); // Only 11______ will be > 0
+  _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-1); // Only 111_____ will be > 0
+  _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-1); // Only 1111____ will be > 0
   // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
-  return simd8<int8_t>(is_second_byte | is_third_byte | is_fourth_byte) > int8_t(0);
+  return _simd8<int8_t>(is_second_byte | is_third_byte | is_fourth_byte) > int8_t(0);
 }
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-  simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
-  simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+  _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
+  _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
   return is_third_byte | is_fourth_byte;
 }
 
@@ -40569,25 +42240,26 @@ _simdjson_warn_unused error_code dom_parser_implementation::stage1(const uint8_t
 _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t len) const noexcept {
   return westmere::stage1::generic_validate_utf8(buf,len);
 }
-_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool replacement_char) const noexcept {
-  return westmere::stringparsing::parse_string(src, dst, replacement_char);
+
+_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
+    return westmere::stringparsing::parse_string(src, dst, allow_replacement);
 }
 _simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return westmere::atomparsing::is_valid_true_atom(src, len);
+    return westmere::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return westmere::atomparsing::is_valid_false_atom(src, len);
+    return westmere::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return westmere::atomparsing::is_valid_null_atom(src, len);
+    return westmere::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return westmere::numberparsing::parse_number(src, writer);
+    return westmere::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::stage2(dom::document &_doc) noexcept {
@@ -40607,29 +42279,31 @@ _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_wobbly_string(co
   return westmere::stringparsing::parse_wobbly_string(src, dst);
 }
 
+
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return westmere::atomparsing::is_valid_true_atom(src, len);
+    return westmere::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return westmere::atomparsing::is_valid_false_atom(src, len);
+    return westmere::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return westmere::atomparsing::is_valid_null_atom(src, len);
+    return westmere::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return westmere::numberparsing::parse_number(src, writer);
+    return westmere::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse(const uint8_t* _buf, size_t _len, dom::document& _doc, bool all) noexcept {
-  auto error = stage1(_buf, _len, stage1_mode::regular);
-  if (error) { return error; } if (!all) { return error_code(); }
-  return stage2(_doc);
+    auto error = stage1(_buf, _len, stage1_mode::regular);
+    if (error) { return error; } if (!all) { return error_code(); }
+    return stage2(_doc);
 }
+
 
 } // namespace westmere
 } // namespace _simdjson
@@ -40688,10 +42362,10 @@ namespace lsx {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace lsx
@@ -40853,21 +42527,21 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_LSX_NUMBERPARSING_DEFS_H
 /* end file _simdjson/lsx/numberparsing_defs.h */
-/* including _simdjson/lsx/simd.h: #include "_simdjson/lsx/simd.h" */
-/* begin file _simdjson/lsx/simd.h */
-#ifndef _SIMDJSON_LSX_SIMD_H
-#define _SIMDJSON_LSX_SIMD_H
+/* including _simdjson/lsx/_simd.h: #include "_simdjson/lsx/_simd.h" */
+/* begin file _simdjson/lsx/_simd.h */
+#ifndef _SIMDJSON_LSX__SIMD_H
+#define _SIMDJSON_LSX__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/lsx/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/lsx/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace lsx {
 namespace {
-namespace simd {
+namespace _simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename Child>
@@ -40877,10 +42551,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m128i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m128i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m128i&() const { return this->value; }
     _simdjson_inline operator __m128i&() { return this->value; }
     _simdjson_inline operator const v16i8&() const { return (v16i8&)this->value; }
@@ -40898,53 +42572,53 @@ namespace simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m128i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_really_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return __lsx_vseq_b(lhs, rhs); }
+    friend _simdjson_really_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return __lsx_vseq_b(lhs, rhs); }
 
-    static const int SIZE = sizeof(base<simd8<T>>::value);
+    static const int SIZE = sizeof(base<_simd8<T>>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return __lsx_vor_v(__lsx_vbsll_v(*this, N), __lsx_vbsrl_v(prev_chunk, 16 - N));
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) {
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) {
       return __lsx_vreplgr2vr_b(uint8_t(-(!!_value)));
     }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m128i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const { return __lsx_vpickve2gr_w(__lsx_vmskltz_b(*this), 0); }
     _simdjson_inline bool any() const { return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(*this), 0); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return __lsx_vreplgr2vr_b(_value); }
-    static _simdjson_inline simd8<T> zero() { return __lsx_vldi(0); }
-    static _simdjson_inline simd8<T> load(const T values[16]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return __lsx_vreplgr2vr_b(_value); }
+    static _simdjson_inline _simd8<T> zero() { return __lsx_vldi(0); }
+    static _simdjson_inline _simd8<T> load(const T values[16]) {
       return __lsx_vld(reinterpret_cast<const __m128i *>(values), 0);
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -40959,17 +42633,17 @@ namespace simd {
     }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return __lsx_vadd_b(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return __lsx_vsub_b(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return __lsx_vadd_b(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return __lsx_vsub_b(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return __lsx_vshuf_b(lookup_table, lookup_table, *this);
     }
 
@@ -41001,12 +42675,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -41017,113 +42691,113 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t values[16]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t values[16]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8({
+    ) : _simd8({
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
       }) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return __lsx_vmax_b(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return __lsx_vmin_b(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return __lsx_vslt_b(other, *this); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return __lsx_vslt_b(*this, other); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return __lsx_vmax_b(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return __lsx_vmin_b(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return __lsx_vslt_b(other, *this); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return __lsx_vslt_b(*this, other); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[16]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[16]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(__m128i(v16u8{
+    ) : _simd8(__m128i(v16u8{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     })) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return __lsx_vsadd_bu(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return __lsx_vssub_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return __lsx_vsadd_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return __lsx_vssub_bu(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return __lsx_vmax_bu(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return __lsx_vmin_bu(other, *this); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return __lsx_vmax_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return __lsx_vmin_bu(other, *this); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const { return 0 == __lsx_vpickve2gr_w(__lsx_vmskltz_b(*this), 0); }
     _simdjson_inline bool bits_not_set_anywhere() const { return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(*this), 0); }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const {
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const {
       return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(__lsx_vand_v(*this, bits)), 0);
     }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(__lsx_vsrli_b(*this, N)); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(__lsx_vsrli_b(*this, N)); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(__lsx_vslli_b(*this, N)); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(__lsx_vslli_b(*this, N)); }
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 4, "LSX kernel should use four registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1, const simd8<T> chunk2, const simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+16), simd8<T>::load(ptr+32), simd8<T>::load(ptr+48)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1, const _simd8<T> chunk2, const _simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+16), _simd8<T>::load(ptr+32), _simd8<T>::load(ptr+48)} {}
 
     _simdjson_inline uint64_t compress(uint64_t mask, T * output) const {
       uint16_t mask1 = uint16_t(mask);
@@ -41153,10 +42827,10 @@ namespace simd {
     }
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
-      this->chunks[2].store(ptr+sizeof(simd8<T>)*2);
-      this->chunks[3].store(ptr+sizeof(simd8<T>)*3);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
+      this->chunks[2].store(ptr+sizeof(_simd8<T>)*2);
+      this->chunks[3].store(ptr+sizeof(_simd8<T>)*3);
     }
 
     _simdjson_inline uint64_t to_bitmask() const {
@@ -41169,13 +42843,13 @@ namespace simd {
       return __lsx_vpickve2gr_du(__lsx_vilvl_w(mask2, mask1), 0);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return (this->chunks[0] | this->chunks[1]) | (this->chunks[2] | this->chunks[3]);
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask,
         this->chunks[2] == mask,
@@ -41183,8 +42857,8 @@ namespace simd {
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1],
         this->chunks[2] == other.chunks[2],
@@ -41193,23 +42867,23 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask,
         this->chunks[2] <= mask,
         this->chunks[3] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace lsx
 } // namespace _simdjson
 
-#endif // _SIMDJSON_LSX_SIMD_H
-/* end file _simdjson/lsx/simd.h */
+#endif // _SIMDJSON_LSX__SIMD_H
+/* end file _simdjson/lsx/_simd.h */
 /* including _simdjson/lsx/stringparsing_defs.h: #include "_simdjson/lsx/stringparsing_defs.h" */
 /* begin file _simdjson/lsx/stringparsing_defs.h */
 #ifndef _SIMDJSON_LSX_STRINGPARSING_DEFS_H
@@ -41217,7 +42891,7 @@ namespace simd {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/lsx/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/lsx/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/lsx/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/lsx/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -41225,13 +42899,13 @@ namespace _simdjson {
 namespace lsx {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return bs_bits != 0; }
@@ -41246,17 +42920,42 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 31 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v0(src);
-  simd8<uint8_t> v1(src + sizeof(v0));
+  _simd8<uint8_t> v0(src);
+  _simd8<uint8_t> v1(src + sizeof(v0));
   v0.store(dst);
   v1.store(dst + sizeof(v0));
 
   // Getting a 64-bit bitmask is much cheaper than multiple 16-bit bitmasks on LSX; therefore, we
   // smash them together into a 64-byte mask and get the bitmask from there.
-  uint64_t bs_and_quote = simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
+  uint64_t bs_and_quote = _simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
   return {
     uint32_t(bs_and_quote),      // bs_bits
     uint32_t(bs_and_quote >> 32) // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    static_cast<uint64_t>((is_backslash | is_quote | is_control).to_bitmask())
   };
 }
 
@@ -41555,20 +43254,23 @@ public:
   inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
   dom_parser_implementation(const dom_parser_implementation &) = delete;
   dom_parser_implementation &operator=(const dom_parser_implementation &) = delete;
-  virtual _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
 
-  virtual _simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
+  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
+  _simdjson_warn_unused error_code stage1(const uint8_t* buf, size_t len, stage1_mode partial) noexcept final;
+  _simdjson_warn_unused error_code stage2(dom::document& doc) noexcept final;
+  _simdjson_warn_unused error_code stage2_next(dom::document& doc) noexcept final;
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept final;
+  _simdjson_warn_unused uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept final;
+
+
   _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
   _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
-
-  virtual inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
-  virtual  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
+  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
+  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
 private:
   _simdjson_inline _simdjson_warn_unused error_code set_capacity_stage1(size_t capacity);
 
@@ -41684,12 +43386,17 @@ struct implementation__simdjson_result_base {
    *
    * @param value The variable to assign the value to. May not be set if there is an error.
    */
-  _simdjson_inline error_code get(T &value) && noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
    * The error.
    */
-  _simdjson_inline error_code error() const noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code error() const noexcept;
+
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_warn_unused _simdjson_inline bool has_value() const noexcept;
 
 #if _SIMDJSON_EXCEPTIONS
 
@@ -41698,6 +43405,16 @@ struct implementation__simdjson_result_base {
    *
    * @throw _simdjson_error if there was an error.
    */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
+
   _simdjson_inline T& value() & noexcept(false);
 
   /**
@@ -41739,6 +43456,10 @@ struct implementation__simdjson_result_base {
    * the error() method returns a value that evaluates to false.
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
+
+  using value_type = T;
+  using error_type = error_code;
+
 protected:
   /** users should never directly access first and second. **/
   T first{}; /** Users should never directly access 'first'. **/
@@ -41921,7 +43642,12 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
   // with a returned value of type value128 with a "low component" corresponding to the
   // 64-bit least significant bits of the product and with a "high component" corresponding
   // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+  _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index]);
+#else
   _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index]);
+#endif
+
   // Both i and power_of_five_128[index] have their most significant bit set to 1 which
   // implies that the either the most or the second most significant bit of the product
   // is 1. We pack values in this manner for efficiency reasons: it maximizes the use
@@ -41954,7 +43680,11 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
     // with a returned value of type value128 with a "low component" corresponding to the
     // 64-bit least significant bits of the product and with a "high component" corresponding
     // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+    _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index + 1]);
+#else
     _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index + 1]);
+#endif
     firstproduct.low += secondproduct.high;
     if(secondproduct.high > firstproduct.low) { firstproduct.high++; }
     // As it has been proven by Noble Mushtak and Daniel Lemire in "Fast Number Parsing Without
@@ -42115,7 +43845,7 @@ _simdjson_inline bool is_digit(const uint8_t c) {
   return static_cast<uint8_t>(c - '0') <= 9;
 }
 
-_simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
   // we continue with the fiction that we have an integer. If the
   // floating point number is representable as x * 10^z for some integer
   // z that fits in 53 bits, then we will be able to convert back the
@@ -42143,7 +43873,7 @@ _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const
   return SUCCESS;
 }
 
-_simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
   // Exp Sign: -123.456e[-]78
   bool neg_exp = ('-' == *p);
   if (neg_exp || '+' == *p) { p++; } // Skip + as well
@@ -42232,7 +43962,7 @@ static error_code slow_float_parsing(_simdjson_unused const uint8_t * src, doubl
 
 /** @private */
 template<typename W>
-_simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
   // If we frequently had to deal with long strings of digits,
   // we could extend our code by using a 128-bit integer instead
   // of a 64-bit integer. However, this is uncommon in practice.
@@ -42295,13 +44025,13 @@ _simdjson_inline error_code write_float(const uint8_t *const src, bool negative,
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
 
 // for performance analysis, it is sometimes  useful to skip parsing
 #ifdef _SIMDJSON_SKIPNUMBERPARSING
 
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
   writer.append_s64(0);        // always write zero
   return SUCCESS;              // always succeeds
 }
@@ -42327,7 +44057,7 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   //
   // Check for minus sign
   //
@@ -42401,7 +44131,16 @@ _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   if (i > uint64_t(INT64_MAX)) {
     WRITE_UNSIGNED(i, src, writer);
   } else {
-    WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+    if(i == 0 && negative) {
+      // We have to write -0.0 instead of 0
+      WRITE_DOUBLE(-0.0, src, writer);
+    } else {
+      WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+    }
+#else
+  WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#endif
   }
   if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return INVALID_NUMBER(src); }
   return SUCCESS;
@@ -42862,6 +44601,12 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
       if (_simdjson_unlikely(digit_count == 19 && memcmp(src, smaller_big_integer, 19) > 0)) {
         return number_type::big_integer;
       }
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+      if(digit_count == 1 && src[0] == '0') {
+        // We have to write -0.0 instead of 0
+        return number_type::floating_point_number;
+      }
+#endif
       return number_type::signed_integer;
     }
     // Let us check if we have a big integer (>=2**64).
@@ -43096,11 +44841,40 @@ _simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_resul
 }
 
 template<typename T>
-_simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
+_simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_warn_unused _simdjson_inline bool implementation__simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+template<typename T>
+_simdjson_inline T& implementation__simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& implementation__simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<implementation__simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* implementation__simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* implementation__simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& implementation__simdjson_result_base<T>::value() & noexcept(false) {
@@ -43197,13 +44971,13 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
 };
 
 } // namespace lsx
@@ -43234,10 +45008,10 @@ namespace lsx {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace lsx
@@ -43399,21 +45173,21 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_LSX_NUMBERPARSING_DEFS_H
 /* end file _simdjson/lsx/numberparsing_defs.h */
-/* including _simdjson/lsx/simd.h: #include "_simdjson/lsx/simd.h" */
-/* begin file _simdjson/lsx/simd.h */
-#ifndef _SIMDJSON_LSX_SIMD_H
-#define _SIMDJSON_LSX_SIMD_H
+/* including _simdjson/lsx/_simd.h: #include "_simdjson/lsx/_simd.h" */
+/* begin file _simdjson/lsx/_simd.h */
+#ifndef _SIMDJSON_LSX__SIMD_H
+#define _SIMDJSON_LSX__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/lsx/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/lsx/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace lsx {
 namespace {
-namespace simd {
+namespace _simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename Child>
@@ -43423,10 +45197,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m128i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m128i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m128i&() const { return this->value; }
     _simdjson_inline operator __m128i&() { return this->value; }
     _simdjson_inline operator const v16i8&() const { return (v16i8&)this->value; }
@@ -43444,53 +45218,53 @@ namespace simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m128i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_really_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return __lsx_vseq_b(lhs, rhs); }
+    friend _simdjson_really_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return __lsx_vseq_b(lhs, rhs); }
 
-    static const int SIZE = sizeof(base<simd8<T>>::value);
+    static const int SIZE = sizeof(base<_simd8<T>>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
       return __lsx_vor_v(__lsx_vbsll_v(*this, N), __lsx_vbsrl_v(prev_chunk, 16 - N));
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) {
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) {
       return __lsx_vreplgr2vr_b(uint8_t(-(!!_value)));
     }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m128i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const { return __lsx_vpickve2gr_w(__lsx_vmskltz_b(*this), 0); }
     _simdjson_inline bool any() const { return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(*this), 0); }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) { return __lsx_vreplgr2vr_b(_value); }
-    static _simdjson_inline simd8<T> zero() { return __lsx_vldi(0); }
-    static _simdjson_inline simd8<T> load(const T values[16]) {
+    static _simdjson_inline _simd8<T> splat(T _value) { return __lsx_vreplgr2vr_b(_value); }
+    static _simdjson_inline _simd8<T> zero() { return __lsx_vldi(0); }
+    static _simdjson_inline _simd8<T> load(const T values[16]) {
       return __lsx_vld(reinterpret_cast<const __m128i *>(values), 0);
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
@@ -43505,17 +45279,17 @@ namespace simd {
     }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return __lsx_vadd_b(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return __lsx_vsub_b(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return __lsx_vadd_b(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return __lsx_vsub_b(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return __lsx_vshuf_b(lookup_table, lookup_table, *this);
     }
 
@@ -43547,12 +45321,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -43563,113 +45337,113 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t values[16]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t values[16]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
-    ) : simd8({
+    ) : _simd8({
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
       }) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return __lsx_vmax_b(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return __lsx_vmin_b(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return __lsx_vslt_b(other, *this); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return __lsx_vslt_b(*this, other); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return __lsx_vmax_b(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return __lsx_vmin_b(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return __lsx_vslt_b(other, *this); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return __lsx_vslt_b(*this, other); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m128i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[16]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[16]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
-    ) : simd8(__m128i(v16u8{
+    ) : _simd8(__m128i(v16u8{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     })) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15
       );
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return __lsx_vsadd_bu(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return __lsx_vssub_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return __lsx_vsadd_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return __lsx_vssub_bu(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return __lsx_vmax_bu(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return __lsx_vmin_bu(other, *this); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return __lsx_vmax_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return __lsx_vmin_bu(other, *this); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const { return 0 == __lsx_vpickve2gr_w(__lsx_vmskltz_b(*this), 0); }
     _simdjson_inline bool bits_not_set_anywhere() const { return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(*this), 0); }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const {
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const {
       return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(__lsx_vand_v(*this, bits)), 0);
     }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(__lsx_vsrli_b(*this, N)); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(__lsx_vsrli_b(*this, N)); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(__lsx_vslli_b(*this, N)); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(__lsx_vslli_b(*this, N)); }
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 4, "LSX kernel should use four registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1, const simd8<T> chunk2, const simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+16), simd8<T>::load(ptr+32), simd8<T>::load(ptr+48)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1, const _simd8<T> chunk2, const _simd8<T> chunk3) : chunks{chunk0, chunk1, chunk2, chunk3} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+16), _simd8<T>::load(ptr+32), _simd8<T>::load(ptr+48)} {}
 
     _simdjson_inline uint64_t compress(uint64_t mask, T * output) const {
       uint16_t mask1 = uint16_t(mask);
@@ -43699,10 +45473,10 @@ namespace simd {
     }
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
-      this->chunks[2].store(ptr+sizeof(simd8<T>)*2);
-      this->chunks[3].store(ptr+sizeof(simd8<T>)*3);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
+      this->chunks[2].store(ptr+sizeof(_simd8<T>)*2);
+      this->chunks[3].store(ptr+sizeof(_simd8<T>)*3);
     }
 
     _simdjson_inline uint64_t to_bitmask() const {
@@ -43715,13 +45489,13 @@ namespace simd {
       return __lsx_vpickve2gr_du(__lsx_vilvl_w(mask2, mask1), 0);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return (this->chunks[0] | this->chunks[1]) | (this->chunks[2] | this->chunks[3]);
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask,
         this->chunks[2] == mask,
@@ -43729,8 +45503,8 @@ namespace simd {
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1],
         this->chunks[2] == other.chunks[2],
@@ -43739,23 +45513,23 @@ namespace simd {
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask,
         this->chunks[2] <= mask,
         this->chunks[3] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace lsx
 } // namespace _simdjson
 
-#endif // _SIMDJSON_LSX_SIMD_H
-/* end file _simdjson/lsx/simd.h */
+#endif // _SIMDJSON_LSX__SIMD_H
+/* end file _simdjson/lsx/_simd.h */
 /* including _simdjson/lsx/stringparsing_defs.h: #include "_simdjson/lsx/stringparsing_defs.h" */
 /* begin file _simdjson/lsx/stringparsing_defs.h */
 #ifndef _SIMDJSON_LSX_STRINGPARSING_DEFS_H
@@ -43763,7 +45537,7 @@ namespace simd {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/lsx/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/lsx/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/lsx/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/lsx/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -43771,13 +45545,13 @@ namespace _simdjson {
 namespace lsx {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return bs_bits != 0; }
@@ -43792,17 +45566,42 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 31 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v0(src);
-  simd8<uint8_t> v1(src + sizeof(v0));
+  _simd8<uint8_t> v0(src);
+  _simd8<uint8_t> v1(src + sizeof(v0));
   v0.store(dst);
   v1.store(dst + sizeof(v0));
 
   // Getting a 64-bit bitmask is much cheaper than multiple 16-bit bitmasks on LSX; therefore, we
   // smash them together into a 64-byte mask and get the bitmask from there.
-  uint64_t bs_and_quote = simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
+  uint64_t bs_and_quote = _simd8x64<bool>(v0 == '\\', v1 == '\\', v0 == '"', v1 == '"').to_bitmask();
   return {
     uint32_t(bs_and_quote),      // bs_bits
     uint32_t(bs_and_quote >> 32) // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    static_cast<uint64_t>((is_backslash | is_quote | is_control).to_bitmask())
   };
 }
 
@@ -43858,8 +45657,8 @@ namespace _simdjson {
 namespace lsx {
 namespace {
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3);
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input);
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3);
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input);
 
 } // unnamed namespace
 } // namespace lsx
@@ -43881,7 +45680,7 @@ namespace lsx {
 namespace {
 
 struct json_character_block {
-  static _simdjson_inline json_character_block classify(const simd::simd8x64<uint8_t>& in);
+  static _simdjson_inline json_character_block classify(const _simd::_simd8x64<uint8_t>& in);
 
   _simdjson_inline uint64_t whitespace() const noexcept { return _whitespace; }
   _simdjson_inline uint64_t op() const noexcept { return _op; }
@@ -43983,38 +45782,38 @@ private:
 
 // Routines to print masks and text for debugging bitmask operations
 _simdjson_unused static char * format_input_text_64(const uint8_t *text) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     buf[i] = int8_t(text[i]) < ' ' ? '_' : int8_t(text[i]);
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 // Routines to print masks and text for debugging bitmask operations
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] < ' ') { buf[i] = '_'; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in, uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in, uint64_t mask) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] <= ' ') { buf[i] = '_'; }
     if (!(mask & (size_t(1) << i))) { buf[i] = ' '; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 _simdjson_unused static char * format_mask(uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   for (size_t i=0; i<64; i++) {
     buf[i] = (mask & (size_t(1) << i)) ? 'X' : ' ';
   }
@@ -44256,7 +46055,7 @@ struct json_string_block {
 // Scans blocks for string characters, storing the state necessary to do so
 class json_string_scanner {
 public:
-  _simdjson_really_inline json_string_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_really_inline json_string_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
   _simdjson_really_inline error_code finish();
 
@@ -44275,7 +46074,7 @@ private:
 //
 // Backslash sequences outside of quotes will be detected in stage 2.
 //
-_simdjson_really_inline json_string_block json_string_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_really_inline json_string_block json_string_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   const uint64_t backslash = in.eq('\\');
   const uint64_t escaped = escape_scanner.next(backslash).escaped;
   const uint64_t quote = in.eq('"') & ~escaped;
@@ -44329,9 +46128,9 @@ namespace lsx {
 namespace {
 namespace utf8_validation {
 
-using namespace simd;
+using namespace _simd;
 
-  _simdjson_inline simd8<uint8_t> check_special_cases(const simd8<uint8_t> input, const simd8<uint8_t> prev1) {
+  _simdjson_inline _simd8<uint8_t> check_special_cases(const _simd8<uint8_t> input, const _simd8<uint8_t> prev1) {
 // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
 // Bit 1 = Too Long (ASCII followed by continuation)
 // Bit 2 = Overlong 3-byte
@@ -44359,7 +46158,7 @@ using namespace simd;
                                                 // 11111___ 1000____
     constexpr const uint8_t OVERLONG_4  = 1<<6; // 11110000 1000____
 
-    const simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
       // 0_______ ________ <ASCII in byte 1>
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
@@ -44375,7 +46174,7 @@ using namespace simd;
       TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4
     );
     constexpr const uint8_t CARRY = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-    const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
       // ____0000 ________
       CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
       // ____0001 ________
@@ -44403,7 +46202,7 @@ using namespace simd;
       CARRY | TOO_LARGE | TOO_LARGE_1000,
       CARRY | TOO_LARGE | TOO_LARGE_1000
     );
-    const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
       // ________ 0_______ <ASCII in byte 2>
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -44421,12 +46220,12 @@ using namespace simd;
     );
     return (byte_1_high & byte_1_low & byte_2_high);
   }
-  _simdjson_inline simd8<uint8_t> check_multibyte_lengths(const simd8<uint8_t> input,
-      const simd8<uint8_t> prev_input, const simd8<uint8_t> sc) {
-    simd8<uint8_t> prev2 = input.prev<2>(prev_input);
-    simd8<uint8_t> prev3 = input.prev<3>(prev_input);
-    simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
-    simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
+  _simdjson_inline _simd8<uint8_t> check_multibyte_lengths(const _simd8<uint8_t> input,
+      const _simd8<uint8_t> prev_input, const _simd8<uint8_t> sc) {
+    _simd8<uint8_t> prev2 = input.prev<2>(prev_input);
+    _simd8<uint8_t> prev3 = input.prev<3>(prev_input);
+    _simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
+    _simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
     return must23_80 ^ sc;
   }
 
@@ -44434,7 +46233,7 @@ using namespace simd;
   // Return nonzero if there are incomplete multibyte characters at the end of the block:
   // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
   //
-  _simdjson_inline simd8<uint8_t> is_incomplete(const simd8<uint8_t> input) {
+  _simdjson_inline _simd8<uint8_t> is_incomplete(const _simd8<uint8_t> input) {
     // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
     // ... 1111____ 111_____ 11______
 #if _SIMDJSON_IMPLEMENTATION_ICELAKE
@@ -44456,26 +46255,26 @@ using namespace simd;
       255, 255, 255, 255, 255, 0xf0u-1, 0xe0u-1, 0xc0u-1
     };
 #endif
-    const simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(simd8<uint8_t>)]);
+    const _simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(_simd8<uint8_t>)]);
     return input.gt_bits(max_value);
   }
 
   struct utf8_checker {
     // If this is nonzero, there has been a UTF-8 error.
-    simd8<uint8_t> error;
+    _simd8<uint8_t> error;
     // The last input we received
-    simd8<uint8_t> prev_input_block;
+    _simd8<uint8_t> prev_input_block;
     // Whether the last input we received was incomplete (used for ASCII fast path)
-    simd8<uint8_t> prev_incomplete;
+    _simd8<uint8_t> prev_incomplete;
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    _simdjson_inline void check_utf8_bytes(const simd8<uint8_t> input, const simd8<uint8_t> prev_input) {
+    _simdjson_inline void check_utf8_bytes(const _simd8<uint8_t> input, const _simd8<uint8_t> prev_input) {
       // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
       // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
-      simd8<uint8_t> prev1 = input.prev<1>(prev_input);
-      simd8<uint8_t> sc = check_special_cases(input, prev1);
+      _simd8<uint8_t> prev1 = input.prev<1>(prev_input);
+      _simd8<uint8_t> sc = check_special_cases(input, prev1);
       this->error |= check_multibyte_lengths(input, prev_input, sc);
     }
 
@@ -44488,32 +46287,32 @@ using namespace simd;
       this->error |= this->prev_incomplete;
     }
 
-    _simdjson_inline void check_next_input(const simd8x64<uint8_t>& input) {
+    _simdjson_inline void check_next_input(const _simd8x64<uint8_t>& input) {
       if(_simdjson_likely(is_ascii(input))) {
         this->error |= this->prev_incomplete;
       } else {
         // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
-        static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 1)
-                ||(simd8x64<uint8_t>::NUM_CHUNKS == 2)
-                || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
+        static_assert((_simd8x64<uint8_t>::NUM_CHUNKS == 1)
+                ||(_simd8x64<uint8_t>::NUM_CHUNKS == 2)
+                || (_simd8x64<uint8_t>::NUM_CHUNKS == 4),
                 "We support one, two or four chunks per 64-byte block.");
-        _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 1) {
+        _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 1) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 2) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 2) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 4) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 4) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
           this->check_utf8_bytes(input.chunks[2], input.chunks[1]);
           this->check_utf8_bytes(input.chunks[3], input.chunks[2]);
         }
-        this->prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
-        this->prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
+        this->prev_incomplete = is_incomplete(input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1]);
+        this->prev_input_block = input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1];
       }
     }
     // do not forget to call check_eof!
-    _simdjson_inline error_code errors() {
+    _simdjson_warn_unused _simdjson_inline error_code errors() {
       return this->error.any_bits_set_anywhere() ? error_code::UTF8_ERROR : error_code::SUCCESS;
     }
 
@@ -44636,9 +46435,9 @@ private:
 class json_scanner {
 public:
   json_scanner() = default;
-  _simdjson_inline json_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_inline json_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
-  _simdjson_inline error_code finish();
+  _simdjson_warn_unused _simdjson_inline error_code finish();
 
 private:
   // Whether the last character of the previous iteration is part of a scalar token
@@ -44661,7 +46460,7 @@ _simdjson_inline uint64_t follows(const uint64_t match, uint64_t &overflow) {
   return result;
 }
 
-_simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_block json_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   json_string_block strings = string_scanner.next(in);
   // identifies the white-space and the structural characters
   json_character_block characters = json_character_block::classify(in);
@@ -44686,7 +46485,7 @@ _simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in
   );
 }
 
-_simdjson_inline error_code json_scanner::finish() {
+_simdjson_warn_unused _simdjson_inline error_code json_scanner::finish() {
   return string_scanner.finish();
 }
 
@@ -44839,18 +46638,18 @@ private:
   {}
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block_buf, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block);
-  _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block);
+  _simdjson_warn_unused _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
   json_scanner scanner{};
   uint8_t *dst;
 };
 
-_simdjson_inline void json_minifier::next(const simd::simd8x64<uint8_t>& in, const json_block& block) {
+_simdjson_inline void json_minifier::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block) {
   uint64_t mask = block.whitespace();
   dst += in.compress(mask, dst);
 }
 
-_simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
+_simdjson_warn_unused _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
   error_code error = scanner.finish();
   if (error) { dst_len = 0; return error; }
   dst_len = dst - dst_start;
@@ -44859,8 +46658,8 @@ _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &ds
 
 template<>
 _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
-  simd::simd8x64<uint8_t> in_2(block_buf+64);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_2(block_buf+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1);
@@ -44870,7 +46669,7 @@ _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_blo
 
 template<>
 _simdjson_inline void json_minifier::step<64>(const uint8_t *block_buf, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
   json_block block_1 = scanner.next(in_1);
   this->next(block_buf, block_1);
   reader.advance();
@@ -45058,8 +46857,8 @@ private:
   _simdjson_inline json_structural_indexer(uint32_t *structural_indexes);
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx);
-  _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx);
+  _simdjson_warn_unused _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
 
   json_scanner scanner{};
   utf8_checker checker{};
@@ -45137,8 +46936,8 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
 
 template<>
 _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
-  simd::simd8x64<uint8_t> in_2(block+64);
+  _simd::_simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_2(block+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1, reader.block_index());
@@ -45148,13 +46947,13 @@ _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, b
 
 template<>
 _simdjson_inline void json_structural_indexer::step<64>(const uint8_t *block, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_1(block);
   json_block block_1 = scanner.next(in_1);
   this->next(in_1, block_1, reader.block_index());
   reader.advance();
 }
 
-_simdjson_inline void json_structural_indexer::next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
+_simdjson_inline void json_structural_indexer::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
   uint64_t unescaped = in.lteq(0x1F);
 #if _SIMDJSON_UTF8VALIDATION
   checker.check_next_input(in);
@@ -45299,13 +47098,13 @@ bool generic_validate_utf8(const uint8_t * input, size_t length) {
     checker c{};
     buf_block_reader<64> reader(input, length);
     while (reader.has_full_block()) {
-      simd::simd8x64<uint8_t> in(reader.full_block());
+      _simd::_simd8x64<uint8_t> in(reader.full_block());
       c.check_next_input(in);
       reader.advance();
     }
     uint8_t block[64]{};
     reader.get_remainder(block);
-    simd::simd8x64<uint8_t> in(block);
+    _simd::_simd8x64<uint8_t> in(block);
     c.check_next_input(in);
     reader.advance();
     c.check_eof();
@@ -45911,6 +47710,7 @@ _simdjson_warn_unused _simdjson_inline error_code json_iterator::visit_primitive
 /* end file generic/stage2/json_iterator.h for lsx */
 /* including generic/stage2/stringparsing.h for lsx: #include <generic/stage2/stringparsing.h> */
 /* begin file generic/stage2/stringparsing.h for lsx */
+#include <cstdint>
 #ifndef _SIMDJSON_SRC_GENERIC_STAGE2_STRINGPARSING_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
@@ -46063,7 +47863,8 @@ _simdjson_inline bool handle_unicode_codepoint_wobbly(const uint8_t **src_ptr,
 _simdjson_warn_unused _simdjson_inline uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) {
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -46108,7 +47909,8 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
   // It is not ideal that this function is nearly identical to parse_string.
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -46150,6 +47952,7 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
 }
 
 } // namespace stringparsing
+
 } // unnamed namespace
 } // namespace lsx
 } // namespace _simdjson
@@ -46547,21 +48350,21 @@ _simdjson_warn_unused error_code implementation::create_dom_parser_implementatio
 
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
-_simdjson_inline json_character_block json_character_block::classify(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_character_block json_character_block::classify(const _simd::_simd8x64<uint8_t>& in) {
   // Inspired by haswell.
   // LSX use low 5 bits as index. For the 6 operators (:,[]{}), the unique-5bits is [6:2].
   // The ASCII white-space and operators have these values: (char, hex, unique-5bits)
   // (' ', 20, 00000) ('\t', 09, 01001) ('\n', 0A, 01010) ('\r', 0D, 01101)
   // (',', 2C, 01011) (':', 3A, 01110) ('[', 5B, 10110) ('{', 7B, 11110) (']', 5D, 10111) ('}', 7D, 11111)
-  const simd8<uint8_t> ws_table = simd8<uint8_t>::repeat_16(
+  const _simd8<uint8_t> ws_table = _simd8<uint8_t>::repeat_16(
     ' ', 0, 0, 0, 0, 0, 0, 0, 0, '\t', '\n', 0, 0, '\r', 0, 0
   );
-  const simd8<uint8_t> op_table_lo = simd8<uint8_t>::repeat_16(
+  const _simd8<uint8_t> op_table_lo = _simd8<uint8_t>::repeat_16(
     1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ',', 0, 0, ':', 0
   );
-  const simd8<uint8_t> op_table_hi = simd8<uint8_t>::repeat_16(
+  const _simd8<uint8_t> op_table_hi = _simd8<uint8_t>::repeat_16(
     0, 0, 0, 0, 0, 0, '[', ']', 0, 0, 0, 0, 0, 0, '{', '}'
   );
   uint64_t ws = in.eq({
@@ -46580,13 +48383,13 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   return { ws, op };
 }
 
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input) {
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input) {
   return input.reduce_or().is_ascii();
 }
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-    simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
-    simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+    _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
+    _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
     return is_third_byte | is_fourth_byte;
 }
 
@@ -46617,27 +48420,26 @@ _simdjson_warn_unused error_code dom_parser_implementation::stage1(const uint8_t
 _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t len) const noexcept {
   return lsx::stage1::generic_validate_utf8(buf,len);
 }
-_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool replacement_char) const noexcept {
-  return lsx::stringparsing::parse_string(src, dst, replacement_char);
+_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
+    return lsx::stringparsing::parse_string(src, dst, allow_replacement);
 }
 _simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return lsx::atomparsing::is_valid_true_atom(src, len);
+    return lsx::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return lsx::atomparsing::is_valid_false_atom(src, len);
+    return lsx::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return lsx::atomparsing::is_valid_null_atom(src, len);
+    return lsx::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return lsx::numberparsing::parse_number(src, writer);
+    return lsx::numberparsing::parse_number(src, writer);
 }
-
 _simdjson_warn_unused error_code dom_parser_implementation::stage2(dom::document &_doc) noexcept {
   return stage2::tape_builder::parse_document<false>(*this, _doc);
 }
@@ -46655,28 +48457,29 @@ _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_wobbly_string(co
   return lsx::stringparsing::parse_wobbly_string(src, dst);
 }
 
+
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return lsx::atomparsing::is_valid_true_atom(src, len);
+    return lsx::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return lsx::atomparsing::is_valid_false_atom(src, len);
+    return lsx::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return lsx::atomparsing::is_valid_null_atom(src, len);
+    return lsx::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return lsx::numberparsing::parse_number(src, writer);
+    return lsx::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse(const uint8_t* _buf, size_t _len, dom::document& _doc, bool all) noexcept {
-  auto error = stage1(_buf, _len, stage1_mode::regular);
-  if (error) { return error; } if (!all) { return error_code(); }
-  return stage2(_doc);
+    auto error = stage1(_buf, _len, stage1_mode::regular);
+    if (error) { return error; } if (!all) { return error_code(); }
+    return stage2(_doc);
 }
 
 } // namespace lsx
@@ -46733,10 +48536,10 @@ namespace lasx {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace lasx
@@ -46898,21 +48701,21 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_LASX_NUMBERPARSING_DEFS_H
 /* end file _simdjson/lasx/numberparsing_defs.h */
-/* including _simdjson/lasx/simd.h: #include "_simdjson/lasx/simd.h" */
-/* begin file _simdjson/lasx/simd.h */
-#ifndef _SIMDJSON_LASX_SIMD_H
-#define _SIMDJSON_LASX_SIMD_H
+/* including _simdjson/lasx/_simd.h: #include "_simdjson/lasx/_simd.h" */
+/* begin file _simdjson/lasx/_simd.h */
+#ifndef _SIMDJSON_LASX__SIMD_H
+#define _SIMDJSON_LASX__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/lasx/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/lasx/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace lasx {
 namespace {
-namespace simd {
+namespace _simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename Child>
@@ -46922,10 +48725,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m256i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m256i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m256i&() const { return this->value; }
     _simdjson_inline operator __m256i&() { return this->value; }
     _simdjson_inline operator const v32i8&() const { return (v32i8&)this->value; }
@@ -46943,19 +48746,19 @@ namespace simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m256i _value) : base<simd8<T>>(_value) {}
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m256i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_really_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return __lasx_xvseq_b(lhs, rhs); }
+    friend _simdjson_really_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return __lasx_xvseq_b(lhs, rhs); }
 
-    static const int SIZE = sizeof(base<simd8<T>>::value);
+    static const int SIZE = sizeof(base<_simd8<T>>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
         __m256i hi = __lasx_xvbsll_v(*this, N);
         __m256i lo = __lasx_xvbsrl_v(*this, 16 - N);
         __m256i tmp = __lasx_xvbsrl_v(prev_chunk, 16 - N);
@@ -46964,15 +48767,15 @@ namespace simd {
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return __lasx_xvreplgr2vr_b(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return __lasx_xvreplgr2vr_b(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m256i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const {
       __m256i mask = __lasx_xvmskltz_b(*this);
@@ -46982,24 +48785,24 @@ namespace simd {
       __m256i v = __lasx_xvmsknz_b(*this);
       return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
     }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) {
+    static _simdjson_inline _simd8<T> splat(T _value) {
       return __lasx_xvreplgr2vr_b(_value);
     }
-    static _simdjson_inline simd8<T> zero() { return __lasx_xvldi(0); }
-    static _simdjson_inline simd8<T> load(const T values[32]) {
+    static _simdjson_inline _simd8<T> zero() { return __lasx_xvldi(0); }
+    static _simdjson_inline _simd8<T> load(const T values[32]) {
       return __lasx_xvld(reinterpret_cast<const __m256i *>(values), 0);
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -47016,17 +48819,17 @@ namespace simd {
     }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return __lasx_xvadd_b(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return __lasx_xvsub_b(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return __lasx_xvadd_b(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return __lasx_xvsub_b(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return __lasx_xvshuf_b(lookup_table, lookup_table, *this);
     }
 
@@ -47070,12 +48873,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -47086,31 +48889,31 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m256i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t values[32]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t values[32]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15,
       int8_t v16, int8_t v17, int8_t v18, int8_t v19, int8_t v20, int8_t v21, int8_t v22, int8_t v23,
       int8_t v24, int8_t v25, int8_t v26, int8_t v27, int8_t v28, int8_t v29, int8_t v30, int8_t v31
-    ) : simd8({
+    ) : _simd8({
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,
       v24,v25,v26,v27,v28,v29,v30,v31
       }) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -47119,39 +48922,39 @@ namespace simd {
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return __lasx_xvmax_b(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return __lasx_xvmin_b(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return __lasx_xvslt_b(other, *this); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return __lasx_xvslt_b(*this, other); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return __lasx_xvmax_b(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return __lasx_xvmin_b(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return __lasx_xvslt_b(other, *this); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return __lasx_xvslt_b(*this, other); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m256i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[32]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[32]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15,
       uint8_t v16, uint8_t v17, uint8_t v18, uint8_t v19, uint8_t v20, uint8_t v21, uint8_t v22, uint8_t v23,
       uint8_t v24, uint8_t v25, uint8_t v26, uint8_t v27, uint8_t v28, uint8_t v29, uint8_t v30, uint8_t v31
-    ) : simd8(__m256i(v32u8{
+    ) : _simd8(__m256i(v32u8{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,
       v24,v25,v26,v27,v28,v29,v30,v31
     })) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -47160,26 +48963,26 @@ namespace simd {
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return __lasx_xvsadd_bu(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return __lasx_xvssub_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return __lasx_xvsadd_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return __lasx_xvssub_bu(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return __lasx_xvmax_bu(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return __lasx_xvmin_bu(other, *this); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return __lasx_xvmax_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return __lasx_xvmin_bu(other, *this); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const {
       __m256i mask = __lasx_xvmskltz_b(*this);
       return (0 == __lasx_xvpickve2gr_w(mask, 0)) && (0 == __lasx_xvpickve2gr_w(mask, 4));
@@ -47189,29 +48992,29 @@ namespace simd {
       return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
     }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const {
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const {
       __m256i v = __lasx_xvmsknz_b(__lasx_xvand_v(*this, bits));
       return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
     }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(__lasx_xvsrli_b(*this, N)); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(__lasx_xvsrli_b(*this, N)); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(__lasx_xvslli_b(*this, N)); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(__lasx_xvslli_b(*this, N)); }
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 2, "LASX kernel should use two registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1) : chunks{chunk0, chunk1} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+32)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1) : chunks{chunk0, chunk1} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+32)} {}
 
     _simdjson_inline uint64_t compress(uint64_t mask, T * output) const {
       uint32_t mask1 = uint32_t(mask);
@@ -47228,8 +49031,8 @@ namespace simd {
     }
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
     }
 
     _simdjson_inline uint64_t to_bitmask() const {
@@ -47242,41 +49045,41 @@ namespace simd {
       return __lasx_xvpickve2gr_du(__lasx_xvpackev_h(mask_tmp, mask0), 0);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return this->chunks[0] | this->chunks[1];
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1]
       ).to_bitmask();
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace lasx
 } // namespace _simdjson
 
-#endif // _SIMDJSON_LASX_SIMD_H
-/* end file _simdjson/lasx/simd.h */
+#endif // _SIMDJSON_LASX__SIMD_H
+/* end file _simdjson/lasx/_simd.h */
 /* including _simdjson/lasx/stringparsing_defs.h: #include "_simdjson/lasx/stringparsing_defs.h" */
 /* begin file _simdjson/lasx/stringparsing_defs.h */
 #ifndef _SIMDJSON_LASX_STRINGPARSING_DEFS_H
@@ -47284,7 +49087,7 @@ namespace simd {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/lasx/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/lasx/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/lasx/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/lasx/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -47292,13 +49095,13 @@ namespace _simdjson {
 namespace lasx {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return bs_bits != 0; }
@@ -47313,11 +49116,36 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 31 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v(src);
+  _simd8<uint8_t> v(src);
   v.store(dst);
   return {
       static_cast<uint32_t>((v == '\\').to_bitmask()),     // bs_bits
       static_cast<uint32_t>((v == '"').to_bitmask()), // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    (is_backslash | is_quote | is_control).to_bitmask()
   };
 }
 
@@ -47616,19 +49444,23 @@ public:
   inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
   dom_parser_implementation(const dom_parser_implementation &) = delete;
   dom_parser_implementation &operator=(const dom_parser_implementation &) = delete;
-  virtual  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
 
-  virtual _simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
-  virtual _simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
+  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
+  _simdjson_warn_unused error_code stage1(const uint8_t* buf, size_t len, stage1_mode partial) noexcept final;
+  _simdjson_warn_unused error_code stage2(dom::document& doc) noexcept final;
+  _simdjson_warn_unused error_code stage2_next(dom::document& doc) noexcept final;
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept final;
+  _simdjson_warn_unused uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept final;
+
+
   _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
   _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
-  virtual  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
-  virtual  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
+  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
+  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
 private:
   _simdjson_inline _simdjson_warn_unused error_code set_capacity_stage1(size_t capacity);
 
@@ -47744,12 +49576,17 @@ struct implementation__simdjson_result_base {
    *
    * @param value The variable to assign the value to. May not be set if there is an error.
    */
-  _simdjson_inline error_code get(T &value) && noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
    * The error.
    */
-  _simdjson_inline error_code error() const noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code error() const noexcept;
+
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_warn_unused _simdjson_inline bool has_value() const noexcept;
 
 #if _SIMDJSON_EXCEPTIONS
 
@@ -47758,6 +49595,16 @@ struct implementation__simdjson_result_base {
    *
    * @throw _simdjson_error if there was an error.
    */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
+
   _simdjson_inline T& value() & noexcept(false);
 
   /**
@@ -47799,6 +49646,10 @@ struct implementation__simdjson_result_base {
    * the error() method returns a value that evaluates to false.
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
+
+  using value_type = T;
+  using error_type = error_code;
+
 protected:
   /** users should never directly access first and second. **/
   T first{}; /** Users should never directly access 'first'. **/
@@ -47981,7 +49832,12 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
   // with a returned value of type value128 with a "low component" corresponding to the
   // 64-bit least significant bits of the product and with a "high component" corresponding
   // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+  _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index]);
+#else
   _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index]);
+#endif
+
   // Both i and power_of_five_128[index] have their most significant bit set to 1 which
   // implies that the either the most or the second most significant bit of the product
   // is 1. We pack values in this manner for efficiency reasons: it maximizes the use
@@ -48014,7 +49870,11 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
     // with a returned value of type value128 with a "low component" corresponding to the
     // 64-bit least significant bits of the product and with a "high component" corresponding
     // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+    _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index + 1]);
+#else
     _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index + 1]);
+#endif
     firstproduct.low += secondproduct.high;
     if(secondproduct.high > firstproduct.low) { firstproduct.high++; }
     // As it has been proven by Noble Mushtak and Daniel Lemire in "Fast Number Parsing Without
@@ -48175,7 +50035,7 @@ _simdjson_inline bool is_digit(const uint8_t c) {
   return static_cast<uint8_t>(c - '0') <= 9;
 }
 
-_simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
   // we continue with the fiction that we have an integer. If the
   // floating point number is representable as x * 10^z for some integer
   // z that fits in 53 bits, then we will be able to convert back the
@@ -48203,7 +50063,7 @@ _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const
   return SUCCESS;
 }
 
-_simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
   // Exp Sign: -123.456e[-]78
   bool neg_exp = ('-' == *p);
   if (neg_exp || '+' == *p) { p++; } // Skip + as well
@@ -48292,7 +50152,7 @@ static error_code slow_float_parsing(_simdjson_unused const uint8_t * src, doubl
 
 /** @private */
 template<typename W>
-_simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
   // If we frequently had to deal with long strings of digits,
   // we could extend our code by using a 128-bit integer instead
   // of a 64-bit integer. However, this is uncommon in practice.
@@ -48355,13 +50215,13 @@ _simdjson_inline error_code write_float(const uint8_t *const src, bool negative,
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
 
 // for performance analysis, it is sometimes  useful to skip parsing
 #ifdef _SIMDJSON_SKIPNUMBERPARSING
 
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
   writer.append_s64(0);        // always write zero
   return SUCCESS;              // always succeeds
 }
@@ -48387,7 +50247,7 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   //
   // Check for minus sign
   //
@@ -48461,7 +50321,16 @@ _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   if (i > uint64_t(INT64_MAX)) {
     WRITE_UNSIGNED(i, src, writer);
   } else {
-    WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+    if(i == 0 && negative) {
+      // We have to write -0.0 instead of 0
+      WRITE_DOUBLE(-0.0, src, writer);
+    } else {
+      WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+    }
+#else
+  WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#endif
   }
   if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return INVALID_NUMBER(src); }
   return SUCCESS;
@@ -48922,6 +50791,12 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
       if (_simdjson_unlikely(digit_count == 19 && memcmp(src, smaller_big_integer, 19) > 0)) {
         return number_type::big_integer;
       }
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+      if(digit_count == 1 && src[0] == '0') {
+        // We have to write -0.0 instead of 0
+        return number_type::floating_point_number;
+      }
+#endif
       return number_type::signed_integer;
     }
     // Let us check if we have a big integer (>=2**64).
@@ -49156,11 +51031,40 @@ _simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_resul
 }
 
 template<typename T>
-_simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
+_simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_warn_unused _simdjson_inline bool implementation__simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+template<typename T>
+_simdjson_inline T& implementation__simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& implementation__simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<implementation__simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* implementation__simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* implementation__simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& implementation__simdjson_result_base<T>::value() & noexcept(false) {
@@ -49257,13 +51161,13 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept ;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
 };
 
 } // namespace lasx
@@ -49294,10 +51198,10 @@ namespace lasx {
 class implementation;
 
 namespace {
-namespace simd {
-template <typename T> struct simd8;
-template <typename T> struct simd8x64;
-} // namespace simd
+namespace _simd {
+template <typename T> struct _simd8;
+template <typename T> struct _simd8x64;
+} // namespace _simd
 } // unnamed namespace
 
 } // namespace lasx
@@ -49459,21 +51363,21 @@ _simdjson_inline internal::value128 full_multiplication(uint64_t value1, uint64_
 
 #endif // _SIMDJSON_LASX_NUMBERPARSING_DEFS_H
 /* end file _simdjson/lasx/numberparsing_defs.h */
-/* including _simdjson/lasx/simd.h: #include "_simdjson/lasx/simd.h" */
-/* begin file _simdjson/lasx/simd.h */
-#ifndef _SIMDJSON_LASX_SIMD_H
-#define _SIMDJSON_LASX_SIMD_H
+/* including _simdjson/lasx/_simd.h: #include "_simdjson/lasx/_simd.h" */
+/* begin file _simdjson/lasx/_simd.h */
+#ifndef _SIMDJSON_LASX__SIMD_H
+#define _SIMDJSON_LASX__SIMD_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/lasx/base.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/lasx/bitmanipulation.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/internal/simdprune_tables.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/internal/_simdprune_tables.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
 namespace _simdjson {
 namespace lasx {
 namespace {
-namespace simd {
+namespace _simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename Child>
@@ -49483,10 +51387,10 @@ namespace simd {
     // Zero constructor
     _simdjson_inline base() : value{__m256i()} {}
 
-    // Conversion from SIMD register
+    // Conversion from _SIMD register
     _simdjson_inline base(const __m256i _value) : value(_value) {}
 
-    // Conversion to SIMD register
+    // Conversion to _SIMD register
     _simdjson_inline operator const __m256i&() const { return this->value; }
     _simdjson_inline operator __m256i&() { return this->value; }
     _simdjson_inline operator const v32i8&() const { return (v32i8&)this->value; }
@@ -49504,19 +51408,19 @@ namespace simd {
 
   // Forward-declared so they can be used by splat and friends.
   template<typename T>
-  struct simd8;
+  struct _simd8;
 
-  template<typename T, typename Mask=simd8<bool>>
-  struct base8: base<simd8<T>> {
-    _simdjson_inline base8() : base<simd8<T>>() {}
-    _simdjson_inline base8(const __m256i _value) : base<simd8<T>>(_value) {}
+  template<typename T, typename Mask=_simd8<bool>>
+  struct base8: base<_simd8<T>> {
+    _simdjson_inline base8() : base<_simd8<T>>() {}
+    _simdjson_inline base8(const __m256i _value) : base<_simd8<T>>(_value) {}
 
-    friend _simdjson_really_inline Mask operator==(const simd8<T> lhs, const simd8<T> rhs) { return __lasx_xvseq_b(lhs, rhs); }
+    friend _simdjson_really_inline Mask operator==(const _simd8<T> lhs, const _simd8<T> rhs) { return __lasx_xvseq_b(lhs, rhs); }
 
-    static const int SIZE = sizeof(base<simd8<T>>::value);
+    static const int SIZE = sizeof(base<_simd8<T>>::value);
 
     template<int N=1>
-    _simdjson_inline simd8<T> prev(const simd8<T> prev_chunk) const {
+    _simdjson_inline _simd8<T> prev(const _simd8<T> prev_chunk) const {
         __m256i hi = __lasx_xvbsll_v(*this, N);
         __m256i lo = __lasx_xvbsrl_v(*this, 16 - N);
         __m256i tmp = __lasx_xvbsrl_v(prev_chunk, 16 - N);
@@ -49525,15 +51429,15 @@ namespace simd {
     }
   };
 
-  // SIMD byte mask type (returned by things like eq and gt)
+  // _SIMD byte mask type (returned by things like eq and gt)
   template<>
-  struct simd8<bool>: base8<bool> {
-    static _simdjson_inline simd8<bool> splat(bool _value) { return __lasx_xvreplgr2vr_b(uint8_t(-(!!_value))); }
+  struct _simd8<bool>: base8<bool> {
+    static _simdjson_inline _simd8<bool> splat(bool _value) { return __lasx_xvreplgr2vr_b(uint8_t(-(!!_value))); }
 
-    _simdjson_inline simd8() : base8() {}
-    _simdjson_inline simd8(const __m256i _value) : base8<bool>(_value) {}
+    _simdjson_inline _simd8() : base8() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8<bool>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
+    _simdjson_inline _simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     _simdjson_inline int to_bitmask() const {
       __m256i mask = __lasx_xvmskltz_b(*this);
@@ -49543,24 +51447,24 @@ namespace simd {
       __m256i v = __lasx_xvmsknz_b(*this);
       return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
     }
-    _simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
+    _simdjson_inline _simd8<bool> operator~() const { return *this ^ true; }
   };
 
   template<typename T>
   struct base8_numeric: base8<T> {
-    static _simdjson_inline simd8<T> splat(T _value) {
+    static _simdjson_inline _simd8<T> splat(T _value) {
       return __lasx_xvreplgr2vr_b(_value);
     }
-    static _simdjson_inline simd8<T> zero() { return __lasx_xvldi(0); }
-    static _simdjson_inline simd8<T> load(const T values[32]) {
+    static _simdjson_inline _simd8<T> zero() { return __lasx_xvldi(0); }
+    static _simdjson_inline _simd8<T> load(const T values[32]) {
       return __lasx_xvld(reinterpret_cast<const __m256i *>(values), 0);
     }
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    static _simdjson_inline simd8<T> repeat_16(
+    static _simdjson_inline _simd8<T> repeat_16(
       T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
       T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
     ) {
-      return simd8<T>(
+      return _simd8<T>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -49577,17 +51481,17 @@ namespace simd {
     }
 
     // Addition/subtraction are the same for signed and unsigned
-    _simdjson_inline simd8<T> operator+(const simd8<T> other) const { return __lasx_xvadd_b(*this, other); }
-    _simdjson_inline simd8<T> operator-(const simd8<T> other) const { return __lasx_xvsub_b(*this, other); }
-    _simdjson_inline simd8<T>& operator+=(const simd8<T> other) { *this = *this + other; return *static_cast<simd8<T>*>(this); }
-    _simdjson_inline simd8<T>& operator-=(const simd8<T> other) { *this = *this - other; return *static_cast<simd8<T>*>(this); }
+    _simdjson_inline _simd8<T> operator+(const _simd8<T> other) const { return __lasx_xvadd_b(*this, other); }
+    _simdjson_inline _simd8<T> operator-(const _simd8<T> other) const { return __lasx_xvsub_b(*this, other); }
+    _simdjson_inline _simd8<T>& operator+=(const _simd8<T> other) { *this = *this + other; return *static_cast<_simd8<T>*>(this); }
+    _simdjson_inline _simd8<T>& operator-=(const _simd8<T> other) { *this = *this - other; return *static_cast<_simd8<T>*>(this); }
 
     // Override to distinguish from bool version
-    _simdjson_inline simd8<T> operator~() const { return *this ^ 0xFFu; }
+    _simdjson_inline _simd8<T> operator~() const { return *this ^ 0xFFu; }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+    _simdjson_inline _simd8<L> lookup_16(_simd8<L> lookup_table) const {
       return __lasx_xvshuf_b(lookup_table, lookup_table, *this);
     }
 
@@ -49631,12 +51535,12 @@ namespace simd {
     }
 
     template<typename L>
-    _simdjson_inline simd8<L> lookup_16(
+    _simdjson_inline _simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return lookup_16(simd8<L>::repeat_16(
+      return lookup_16(_simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
@@ -49647,31 +51551,31 @@ namespace simd {
 
   // Signed bytes
   template<>
-  struct simd8<int8_t> : base8_numeric<int8_t> {
-    _simdjson_inline simd8() : base8_numeric<int8_t>() {}
-    _simdjson_inline simd8(const __m256i _value) : base8_numeric<int8_t>(_value) {}
+  struct _simd8<int8_t> : base8_numeric<int8_t> {
+    _simdjson_inline _simd8() : base8_numeric<int8_t>() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8_numeric<int8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(int8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(int8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const int8_t values[32]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const int8_t values[32]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15,
       int8_t v16, int8_t v17, int8_t v18, int8_t v19, int8_t v20, int8_t v21, int8_t v22, int8_t v23,
       int8_t v24, int8_t v25, int8_t v26, int8_t v27, int8_t v28, int8_t v29, int8_t v30, int8_t v31
-    ) : simd8({
+    ) : _simd8({
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,
       v24,v25,v26,v27,v28,v29,v30,v31
       }) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<int8_t> repeat_16(
+    _simdjson_inline static _simd8<int8_t> repeat_16(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
     ) {
-      return simd8<int8_t>(
+      return _simd8<int8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -49680,39 +51584,39 @@ namespace simd {
     }
 
     // Order-sensitive comparisons
-    _simdjson_inline simd8<int8_t> max_val(const simd8<int8_t> other) const { return __lasx_xvmax_b(*this, other); }
-    _simdjson_inline simd8<int8_t> min_val(const simd8<int8_t> other) const { return __lasx_xvmin_b(*this, other); }
-    _simdjson_inline simd8<bool> operator>(const simd8<int8_t> other) const { return __lasx_xvslt_b(other, *this); }
-    _simdjson_inline simd8<bool> operator<(const simd8<int8_t> other) const { return __lasx_xvslt_b(*this, other); }
+    _simdjson_inline _simd8<int8_t> max_val(const _simd8<int8_t> other) const { return __lasx_xvmax_b(*this, other); }
+    _simdjson_inline _simd8<int8_t> min_val(const _simd8<int8_t> other) const { return __lasx_xvmin_b(*this, other); }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<int8_t> other) const { return __lasx_xvslt_b(other, *this); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<int8_t> other) const { return __lasx_xvslt_b(*this, other); }
   };
 
   // Unsigned bytes
   template<>
-  struct simd8<uint8_t>: base8_numeric<uint8_t> {
-    _simdjson_inline simd8() : base8_numeric<uint8_t>() {}
-    _simdjson_inline simd8(const __m256i _value) : base8_numeric<uint8_t>(_value) {}
+  struct _simd8<uint8_t>: base8_numeric<uint8_t> {
+    _simdjson_inline _simd8() : base8_numeric<uint8_t>() {}
+    _simdjson_inline _simd8(const __m256i _value) : base8_numeric<uint8_t>(_value) {}
     // Splat constructor
-    _simdjson_inline simd8(uint8_t _value) : simd8(splat(_value)) {}
+    _simdjson_inline _simd8(uint8_t _value) : _simd8(splat(_value)) {}
     // Array constructor
-    _simdjson_inline simd8(const uint8_t values[32]) : simd8(load(values)) {}
+    _simdjson_inline _simd8(const uint8_t values[32]) : _simd8(load(values)) {}
     // Member-by-member initialization
-    _simdjson_inline simd8(
+    _simdjson_inline _simd8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15,
       uint8_t v16, uint8_t v17, uint8_t v18, uint8_t v19, uint8_t v20, uint8_t v21, uint8_t v22, uint8_t v23,
       uint8_t v24, uint8_t v25, uint8_t v26, uint8_t v27, uint8_t v28, uint8_t v29, uint8_t v30, uint8_t v31
-    ) : simd8(__m256i(v32u8{
+    ) : _simd8(__m256i(v32u8{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,
       v24,v25,v26,v27,v28,v29,v30,v31
     })) {}
     // Repeat 16 values as many times as necessary (usually for lookup tables)
-    _simdjson_inline static simd8<uint8_t> repeat_16(
+    _simdjson_inline static _simd8<uint8_t> repeat_16(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
     ) {
-      return simd8<uint8_t>(
+      return _simd8<uint8_t>(
         v0, v1, v2, v3, v4, v5, v6, v7,
         v8, v9, v10,v11,v12,v13,v14,v15,
         v0, v1, v2, v3, v4, v5, v6, v7,
@@ -49721,26 +51625,26 @@ namespace simd {
     }
 
     // Saturated math
-    _simdjson_inline simd8<uint8_t> saturating_add(const simd8<uint8_t> other) const { return __lasx_xvsadd_bu(*this, other); }
-    _simdjson_inline simd8<uint8_t> saturating_sub(const simd8<uint8_t> other) const { return __lasx_xvssub_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_add(const _simd8<uint8_t> other) const { return __lasx_xvsadd_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> saturating_sub(const _simd8<uint8_t> other) const { return __lasx_xvssub_bu(*this, other); }
 
     // Order-specific operations
-    _simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return __lasx_xvmax_bu(*this, other); }
-    _simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return __lasx_xvmin_bu(other, *this); }
+    _simdjson_inline _simd8<uint8_t> max_val(const _simd8<uint8_t> other) const { return __lasx_xvmax_bu(*this, other); }
+    _simdjson_inline _simd8<uint8_t> min_val(const _simd8<uint8_t> other) const { return __lasx_xvmin_bu(other, *this); }
     // Same as >, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> gt_bits(const simd8<uint8_t> other) const { return this->saturating_sub(other); }
+    _simdjson_inline _simd8<uint8_t> gt_bits(const _simd8<uint8_t> other) const { return this->saturating_sub(other); }
     // Same as <, but only guarantees true is nonzero (< guarantees true = -1)
-    _simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return other.saturating_sub(*this); }
-    _simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
-    _simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    _simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<uint8_t> lt_bits(const _simd8<uint8_t> other) const { return other.saturating_sub(*this); }
+    _simdjson_inline _simd8<bool> operator<=(const _simd8<uint8_t> other) const { return other.max_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>=(const _simd8<uint8_t> other) const { return other.min_val(*this) == other; }
+    _simdjson_inline _simd8<bool> operator>(const _simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    _simdjson_inline _simd8<bool> operator<(const _simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
-    _simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
-    _simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
-    _simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    _simdjson_inline _simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    _simdjson_inline _simd8<bool> bits_not_set(_simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    _simdjson_inline _simd8<bool> any_bits_set(_simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
     _simdjson_inline bool is_ascii() const {
       __m256i mask = __lasx_xvmskltz_b(*this);
       return (0 == __lasx_xvpickve2gr_w(mask, 0)) && (0 == __lasx_xvpickve2gr_w(mask, 4));
@@ -49750,29 +51654,29 @@ namespace simd {
       return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
     }
     _simdjson_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
-    _simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const {
+    _simdjson_inline bool bits_not_set_anywhere(_simd8<uint8_t> bits) const {
       __m256i v = __lasx_xvmsknz_b(__lasx_xvand_v(*this, bits));
       return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
     }
-    _simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
+    _simdjson_inline bool any_bits_set_anywhere(_simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(__lasx_xvsrli_b(*this, N)); }
+    _simdjson_inline _simd8<uint8_t> shr() const { return _simd8<uint8_t>(__lasx_xvsrli_b(*this, N)); }
     template<int N>
-    _simdjson_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(__lasx_xvslli_b(*this, N)); }
+    _simdjson_inline _simd8<uint8_t> shl() const { return _simd8<uint8_t>(__lasx_xvslli_b(*this, N)); }
   };
 
   template<typename T>
-  struct simd8x64 {
-    static constexpr int NUM_CHUNKS = 64 / sizeof(simd8<T>);
+  struct _simd8x64 {
+    static constexpr int NUM_CHUNKS = 64 / sizeof(_simd8<T>);
     static_assert(NUM_CHUNKS == 2, "LASX kernel should use two registers per 64-byte block.");
-    const simd8<T> chunks[NUM_CHUNKS];
+    const _simd8<T> chunks[NUM_CHUNKS];
 
-    simd8x64(const simd8x64<T>& o) = delete; // no copy allowed
-    simd8x64<T>& operator=(const simd8<T>& other) = delete; // no assignment allowed
-    simd8x64() = delete; // no default constructor allowed
+    _simd8x64(const _simd8x64<T>& o) = delete; // no copy allowed
+    _simd8x64<T>& operator=(const _simd8<T>& other) = delete; // no assignment allowed
+    _simd8x64() = delete; // no default constructor allowed
 
-    _simdjson_inline simd8x64(const simd8<T> chunk0, const simd8<T> chunk1) : chunks{chunk0, chunk1} {}
-    _simdjson_inline simd8x64(const T ptr[64]) : chunks{simd8<T>::load(ptr), simd8<T>::load(ptr+32)} {}
+    _simdjson_inline _simd8x64(const _simd8<T> chunk0, const _simd8<T> chunk1) : chunks{chunk0, chunk1} {}
+    _simdjson_inline _simd8x64(const T ptr[64]) : chunks{_simd8<T>::load(ptr), _simd8<T>::load(ptr+32)} {}
 
     _simdjson_inline uint64_t compress(uint64_t mask, T * output) const {
       uint32_t mask1 = uint32_t(mask);
@@ -49789,8 +51693,8 @@ namespace simd {
     }
 
     _simdjson_inline void store(T ptr[64]) const {
-      this->chunks[0].store(ptr+sizeof(simd8<T>)*0);
-      this->chunks[1].store(ptr+sizeof(simd8<T>)*1);
+      this->chunks[0].store(ptr+sizeof(_simd8<T>)*0);
+      this->chunks[1].store(ptr+sizeof(_simd8<T>)*1);
     }
 
     _simdjson_inline uint64_t to_bitmask() const {
@@ -49803,41 +51707,41 @@ namespace simd {
       return __lasx_xvpickve2gr_du(__lasx_xvpackev_h(mask_tmp, mask0), 0);
     }
 
-    _simdjson_inline simd8<T> reduce_or() const {
+    _simdjson_inline _simd8<T> reduce_or() const {
       return this->chunks[0] | this->chunks[1];
     }
 
     _simdjson_inline uint64_t eq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] == mask,
         this->chunks[1] == mask
       ).to_bitmask();
     }
 
-    _simdjson_inline uint64_t eq(const simd8x64<uint8_t> &other) const {
-      return  simd8x64<bool>(
+    _simdjson_inline uint64_t eq(const _simd8x64<uint8_t> &other) const {
+      return  _simd8x64<bool>(
         this->chunks[0] == other.chunks[0],
         this->chunks[1] == other.chunks[1]
       ).to_bitmask();
     }
 
     _simdjson_inline uint64_t lteq(const T m) const {
-      const simd8<T> mask = simd8<T>::splat(m);
-      return  simd8x64<bool>(
+      const _simd8<T> mask = _simd8<T>::splat(m);
+      return  _simd8x64<bool>(
         this->chunks[0] <= mask,
         this->chunks[1] <= mask
       ).to_bitmask();
     }
-  }; // struct simd8x64<T>
+  }; // struct _simd8x64<T>
 
-} // namespace simd
+} // namespace _simd
 } // unnamed namespace
 } // namespace lasx
 } // namespace _simdjson
 
-#endif // _SIMDJSON_LASX_SIMD_H
-/* end file _simdjson/lasx/simd.h */
+#endif // _SIMDJSON_LASX__SIMD_H
+/* end file _simdjson/lasx/_simd.h */
 /* including _simdjson/lasx/stringparsing_defs.h: #include "_simdjson/lasx/stringparsing_defs.h" */
 /* begin file _simdjson/lasx/stringparsing_defs.h */
 #ifndef _SIMDJSON_LASX_STRINGPARSING_DEFS_H
@@ -49845,7 +51749,7 @@ namespace simd {
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
 /* amalgamation skipped (editor-only): #include "_simdjson/lasx/base.h" */
-/* amalgamation skipped (editor-only): #include "_simdjson/lasx/simd.h" */
+/* amalgamation skipped (editor-only): #include "_simdjson/lasx/_simd.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/lasx/bitmanipulation.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
@@ -49853,13 +51757,13 @@ namespace _simdjson {
 namespace lasx {
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
 // Holds backslashes and quotes locations.
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 32;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return ((bs_bits - 1) & quote_bits) != 0; }
   _simdjson_inline bool has_backslash() { return bs_bits != 0; }
@@ -49874,11 +51778,36 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // this can read up to 31 bytes beyond the buffer size, but we require
   // _SIMDJSON_PADDING of padding
   static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "backslash and quote finder must process fewer than _SIMDJSON_PADDING bytes");
-  simd8<uint8_t> v(src);
+  _simd8<uint8_t> v(src);
   v.store(dst);
   return {
       static_cast<uint32_t>((v == '\\').to_bitmask()),     // bs_bits
       static_cast<uint32_t>((v == '"').to_bitmask()), // quote_bits
+  };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 16;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits != 0; }
+  _simdjson_inline int escape_index() { return trailing_zeroes(escape_bits); }
+
+  uint64_t escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  static_assert(_SIMDJSON_PADDING >= (BYTES_PROCESSED - 1), "escaping finder must process fewer than _SIMDJSON_PADDING bytes");
+  _simd8<uint8_t> v(src);
+  v.store(dst);
+  _simd8<bool> is_quote = (v == '"');
+  _simd8<bool> is_backslash = (v == '\\');
+  _simd8<bool> is_control = (v < 32);
+  return {
+    (is_backslash | is_quote | is_control).to_bitmask()
   };
 }
 
@@ -49934,8 +51863,8 @@ namespace _simdjson {
 namespace lasx {
 namespace {
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3);
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input);
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3);
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input);
 
 } // unnamed namespace
 } // namespace lasx
@@ -49957,7 +51886,7 @@ namespace lasx {
 namespace {
 
 struct json_character_block {
-  static _simdjson_inline json_character_block classify(const simd::simd8x64<uint8_t>& in);
+  static _simdjson_inline json_character_block classify(const _simd::_simd8x64<uint8_t>& in);
 
   _simdjson_inline uint64_t whitespace() const noexcept { return _whitespace; }
   _simdjson_inline uint64_t op() const noexcept { return _op; }
@@ -50059,38 +51988,38 @@ private:
 
 // Routines to print masks and text for debugging bitmask operations
 _simdjson_unused static char * format_input_text_64(const uint8_t *text) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     buf[i] = int8_t(text[i]) < ' ' ? '_' : int8_t(text[i]);
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 // Routines to print masks and text for debugging bitmask operations
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] < ' ') { buf[i] = '_'; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
-_simdjson_unused static char * format_input_text(const simd8x64<uint8_t>& in, uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+_simdjson_unused static char * format_input_text(const _simd8x64<uint8_t>& in, uint64_t mask) {
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   in.store(reinterpret_cast<uint8_t*>(buf));
-  for (size_t i=0; i<sizeof(simd8x64<uint8_t>); i++) {
+  for (size_t i=0; i<sizeof(_simd8x64<uint8_t>); i++) {
     if (buf[i] <= ' ') { buf[i] = '_'; }
     if (!(mask & (size_t(1) << i))) { buf[i] = ' '; }
   }
-  buf[sizeof(simd8x64<uint8_t>)] = '\0';
+  buf[sizeof(_simd8x64<uint8_t>)] = '\0';
   return buf;
 }
 
 _simdjson_unused static char * format_mask(uint64_t mask) {
-  static char buf[sizeof(simd8x64<uint8_t>) + 1];
+  static char buf[sizeof(_simd8x64<uint8_t>) + 1];
   for (size_t i=0; i<64; i++) {
     buf[i] = (mask & (size_t(1) << i)) ? 'X' : ' ';
   }
@@ -50332,7 +52261,7 @@ struct json_string_block {
 // Scans blocks for string characters, storing the state necessary to do so
 class json_string_scanner {
 public:
-  _simdjson_really_inline json_string_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_really_inline json_string_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
   _simdjson_really_inline error_code finish();
 
@@ -50351,7 +52280,7 @@ private:
 //
 // Backslash sequences outside of quotes will be detected in stage 2.
 //
-_simdjson_really_inline json_string_block json_string_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_really_inline json_string_block json_string_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   const uint64_t backslash = in.eq('\\');
   const uint64_t escaped = escape_scanner.next(backslash).escaped;
   const uint64_t quote = in.eq('"') & ~escaped;
@@ -50405,9 +52334,9 @@ namespace lasx {
 namespace {
 namespace utf8_validation {
 
-using namespace simd;
+using namespace _simd;
 
-  _simdjson_inline simd8<uint8_t> check_special_cases(const simd8<uint8_t> input, const simd8<uint8_t> prev1) {
+  _simdjson_inline _simd8<uint8_t> check_special_cases(const _simd8<uint8_t> input, const _simd8<uint8_t> prev1) {
 // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
 // Bit 1 = Too Long (ASCII followed by continuation)
 // Bit 2 = Overlong 3-byte
@@ -50435,7 +52364,7 @@ using namespace simd;
                                                 // 11111___ 1000____
     constexpr const uint8_t OVERLONG_4  = 1<<6; // 11110000 1000____
 
-    const simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
       // 0_______ ________ <ASCII in byte 1>
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
       TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
@@ -50451,7 +52380,7 @@ using namespace simd;
       TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4
     );
     constexpr const uint8_t CARRY = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-    const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
       // ____0000 ________
       CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
       // ____0001 ________
@@ -50479,7 +52408,7 @@ using namespace simd;
       CARRY | TOO_LARGE | TOO_LARGE_1000,
       CARRY | TOO_LARGE | TOO_LARGE_1000
     );
-    const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
+    const _simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
       // ________ 0_______ <ASCII in byte 2>
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
       TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -50497,12 +52426,12 @@ using namespace simd;
     );
     return (byte_1_high & byte_1_low & byte_2_high);
   }
-  _simdjson_inline simd8<uint8_t> check_multibyte_lengths(const simd8<uint8_t> input,
-      const simd8<uint8_t> prev_input, const simd8<uint8_t> sc) {
-    simd8<uint8_t> prev2 = input.prev<2>(prev_input);
-    simd8<uint8_t> prev3 = input.prev<3>(prev_input);
-    simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
-    simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
+  _simdjson_inline _simd8<uint8_t> check_multibyte_lengths(const _simd8<uint8_t> input,
+      const _simd8<uint8_t> prev_input, const _simd8<uint8_t> sc) {
+    _simd8<uint8_t> prev2 = input.prev<2>(prev_input);
+    _simd8<uint8_t> prev3 = input.prev<3>(prev_input);
+    _simd8<uint8_t> must23 = must_be_2_3_continuation(prev2, prev3);
+    _simd8<uint8_t> must23_80 = must23 & uint8_t(0x80);
     return must23_80 ^ sc;
   }
 
@@ -50510,7 +52439,7 @@ using namespace simd;
   // Return nonzero if there are incomplete multibyte characters at the end of the block:
   // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
   //
-  _simdjson_inline simd8<uint8_t> is_incomplete(const simd8<uint8_t> input) {
+  _simdjson_inline _simd8<uint8_t> is_incomplete(const _simd8<uint8_t> input) {
     // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
     // ... 1111____ 111_____ 11______
 #if _SIMDJSON_IMPLEMENTATION_ICELAKE
@@ -50532,26 +52461,26 @@ using namespace simd;
       255, 255, 255, 255, 255, 0xf0u-1, 0xe0u-1, 0xc0u-1
     };
 #endif
-    const simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(simd8<uint8_t>)]);
+    const _simd8<uint8_t> max_value(&max_array[sizeof(max_array)-sizeof(_simd8<uint8_t>)]);
     return input.gt_bits(max_value);
   }
 
   struct utf8_checker {
     // If this is nonzero, there has been a UTF-8 error.
-    simd8<uint8_t> error;
+    _simd8<uint8_t> error;
     // The last input we received
-    simd8<uint8_t> prev_input_block;
+    _simd8<uint8_t> prev_input_block;
     // Whether the last input we received was incomplete (used for ASCII fast path)
-    simd8<uint8_t> prev_incomplete;
+    _simd8<uint8_t> prev_incomplete;
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    _simdjson_inline void check_utf8_bytes(const simd8<uint8_t> input, const simd8<uint8_t> prev_input) {
+    _simdjson_inline void check_utf8_bytes(const _simd8<uint8_t> input, const _simd8<uint8_t> prev_input) {
       // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
       // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
-      simd8<uint8_t> prev1 = input.prev<1>(prev_input);
-      simd8<uint8_t> sc = check_special_cases(input, prev1);
+      _simd8<uint8_t> prev1 = input.prev<1>(prev_input);
+      _simd8<uint8_t> sc = check_special_cases(input, prev1);
       this->error |= check_multibyte_lengths(input, prev_input, sc);
     }
 
@@ -50564,32 +52493,32 @@ using namespace simd;
       this->error |= this->prev_incomplete;
     }
 
-    _simdjson_inline void check_next_input(const simd8x64<uint8_t>& input) {
+    _simdjson_inline void check_next_input(const _simd8x64<uint8_t>& input) {
       if(_simdjson_likely(is_ascii(input))) {
         this->error |= this->prev_incomplete;
       } else {
         // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
-        static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 1)
-                ||(simd8x64<uint8_t>::NUM_CHUNKS == 2)
-                || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
+        static_assert((_simd8x64<uint8_t>::NUM_CHUNKS == 1)
+                ||(_simd8x64<uint8_t>::NUM_CHUNKS == 2)
+                || (_simd8x64<uint8_t>::NUM_CHUNKS == 4),
                 "We support one, two or four chunks per 64-byte block.");
-        _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 1) {
+        _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 1) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 2) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 2) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
-        } else _SIMDJSON_IF_CONSTEXPR (simd8x64<uint8_t>::NUM_CHUNKS == 4) {
+        } else _SIMDJSON_IF_CONSTEXPR (_simd8x64<uint8_t>::NUM_CHUNKS == 4) {
           this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
           this->check_utf8_bytes(input.chunks[1], input.chunks[0]);
           this->check_utf8_bytes(input.chunks[2], input.chunks[1]);
           this->check_utf8_bytes(input.chunks[3], input.chunks[2]);
         }
-        this->prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
-        this->prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
+        this->prev_incomplete = is_incomplete(input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1]);
+        this->prev_input_block = input.chunks[_simd8x64<uint8_t>::NUM_CHUNKS-1];
       }
     }
     // do not forget to call check_eof!
-    _simdjson_inline error_code errors() {
+    _simdjson_warn_unused _simdjson_inline error_code errors() {
       return this->error.any_bits_set_anywhere() ? error_code::UTF8_ERROR : error_code::SUCCESS;
     }
 
@@ -50712,9 +52641,9 @@ private:
 class json_scanner {
 public:
   json_scanner() = default;
-  _simdjson_inline json_block next(const simd::simd8x64<uint8_t>& in);
+  _simdjson_inline json_block next(const _simd::_simd8x64<uint8_t>& in);
   // Returns either UNCLOSED_STRING or SUCCESS
-  _simdjson_inline error_code finish();
+  _simdjson_warn_unused _simdjson_inline error_code finish();
 
 private:
   // Whether the last character of the previous iteration is part of a scalar token
@@ -50737,7 +52666,7 @@ _simdjson_inline uint64_t follows(const uint64_t match, uint64_t &overflow) {
   return result;
 }
 
-_simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_block json_scanner::next(const _simd::_simd8x64<uint8_t>& in) {
   json_string_block strings = string_scanner.next(in);
   // identifies the white-space and the structural characters
   json_character_block characters = json_character_block::classify(in);
@@ -50762,7 +52691,7 @@ _simdjson_inline json_block json_scanner::next(const simd::simd8x64<uint8_t>& in
   );
 }
 
-_simdjson_inline error_code json_scanner::finish() {
+_simdjson_warn_unused _simdjson_inline error_code json_scanner::finish() {
   return string_scanner.finish();
 }
 
@@ -50915,18 +52844,18 @@ private:
   {}
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block_buf, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block);
-  _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block);
+  _simdjson_warn_unused _simdjson_inline error_code finish(uint8_t *dst_start, size_t &dst_len);
   json_scanner scanner{};
   uint8_t *dst;
 };
 
-_simdjson_inline void json_minifier::next(const simd::simd8x64<uint8_t>& in, const json_block& block) {
+_simdjson_inline void json_minifier::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block) {
   uint64_t mask = block.whitespace();
   dst += in.compress(mask, dst);
 }
 
-_simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
+_simdjson_warn_unused _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &dst_len) {
   error_code error = scanner.finish();
   if (error) { dst_len = 0; return error; }
   dst_len = dst - dst_start;
@@ -50935,8 +52864,8 @@ _simdjson_inline error_code json_minifier::finish(uint8_t *dst_start, size_t &ds
 
 template<>
 _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
-  simd::simd8x64<uint8_t> in_2(block_buf+64);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_2(block_buf+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1);
@@ -50946,7 +52875,7 @@ _simdjson_inline void json_minifier::step<128>(const uint8_t *block_buf, buf_blo
 
 template<>
 _simdjson_inline void json_minifier::step<64>(const uint8_t *block_buf, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block_buf);
+  _simd::_simd8x64<uint8_t> in_1(block_buf);
   json_block block_1 = scanner.next(in_1);
   this->next(block_buf, block_1);
   reader.advance();
@@ -51134,8 +53063,8 @@ private:
   _simdjson_inline json_structural_indexer(uint32_t *structural_indexes);
   template<size_t STEP_SIZE>
   _simdjson_inline void step(const uint8_t *block, buf_block_reader<STEP_SIZE> &reader) noexcept;
-  _simdjson_inline void next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx);
-  _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
+  _simdjson_inline void next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx);
+  _simdjson_warn_unused _simdjson_inline error_code finish(dom_parser_implementation &parser, size_t idx, size_t len, stage1_mode partial);
 
   json_scanner scanner{};
   utf8_checker checker{};
@@ -51213,8 +53142,8 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
 
 template<>
 _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, buf_block_reader<128> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
-  simd::simd8x64<uint8_t> in_2(block+64);
+  _simd::_simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_2(block+64);
   json_block block_1 = scanner.next(in_1);
   json_block block_2 = scanner.next(in_2);
   this->next(in_1, block_1, reader.block_index());
@@ -51224,13 +53153,13 @@ _simdjson_inline void json_structural_indexer::step<128>(const uint8_t *block, b
 
 template<>
 _simdjson_inline void json_structural_indexer::step<64>(const uint8_t *block, buf_block_reader<64> &reader) noexcept {
-  simd::simd8x64<uint8_t> in_1(block);
+  _simd::_simd8x64<uint8_t> in_1(block);
   json_block block_1 = scanner.next(in_1);
   this->next(in_1, block_1, reader.block_index());
   reader.advance();
 }
 
-_simdjson_inline void json_structural_indexer::next(const simd::simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
+_simdjson_inline void json_structural_indexer::next(const _simd::_simd8x64<uint8_t>& in, const json_block& block, size_t idx) {
   uint64_t unescaped = in.lteq(0x1F);
 #if _SIMDJSON_UTF8VALIDATION
   checker.check_next_input(in);
@@ -51375,13 +53304,13 @@ bool generic_validate_utf8(const uint8_t * input, size_t length) {
     checker c{};
     buf_block_reader<64> reader(input, length);
     while (reader.has_full_block()) {
-      simd::simd8x64<uint8_t> in(reader.full_block());
+      _simd::_simd8x64<uint8_t> in(reader.full_block());
       c.check_next_input(in);
       reader.advance();
     }
     uint8_t block[64]{};
     reader.get_remainder(block);
-    simd::simd8x64<uint8_t> in(block);
+    _simd::_simd8x64<uint8_t> in(block);
     c.check_next_input(in);
     reader.advance();
     c.check_eof();
@@ -51987,6 +53916,7 @@ _simdjson_warn_unused _simdjson_inline error_code json_iterator::visit_primitive
 /* end file generic/stage2/json_iterator.h for lasx */
 /* including generic/stage2/stringparsing.h for lasx: #include <generic/stage2/stringparsing.h> */
 /* begin file generic/stage2/stringparsing.h for lasx */
+#include <cstdint>
 #ifndef _SIMDJSON_SRC_GENERIC_STAGE2_STRINGPARSING_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
@@ -52139,7 +54069,8 @@ _simdjson_inline bool handle_unicode_codepoint_wobbly(const uint8_t **src_ptr,
 _simdjson_warn_unused _simdjson_inline uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) {
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -52184,7 +54115,8 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
   // It is not ideal that this function is nearly identical to parse_string.
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -52226,6 +54158,7 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
 }
 
 } // namespace stringparsing
+
 } // unnamed namespace
 } // namespace lasx
 } // namespace _simdjson
@@ -52623,21 +54556,21 @@ _simdjson_warn_unused error_code implementation::create_dom_parser_implementatio
 
 namespace {
 
-using namespace simd;
+using namespace _simd;
 
-_simdjson_inline json_character_block json_character_block::classify(const simd::simd8x64<uint8_t>& in) {
+_simdjson_inline json_character_block json_character_block::classify(const _simd::_simd8x64<uint8_t>& in) {
   // Inspired by haswell.
   // LASX use low 5 bits as index. For the 6 operators (:,[]{}), the unique-5bits is [6:2].
   // The ASCII white-space and operators have these values: (char, hex, unique-5bits)
   // (' ', 20, 00000) ('\t', 09, 01001) ('\n', 0A, 01010) ('\r', 0D, 01101)
   // (',', 2C, 01011) (':', 3A, 01110) ('[', 5B, 10110) ('{', 7B, 11110) (']', 5D, 10111) ('}', 7D, 11111)
-  const simd8<uint8_t> ws_table = simd8<uint8_t>::repeat_16(
+  const _simd8<uint8_t> ws_table = _simd8<uint8_t>::repeat_16(
     ' ', 0, 0, 0, 0, 0, 0, 0, 0, '\t', '\n', 0, 0, '\r', 0, 0
   );
-  const simd8<uint8_t> op_table_lo = simd8<uint8_t>::repeat_16(
+  const _simd8<uint8_t> op_table_lo = _simd8<uint8_t>::repeat_16(
     1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ',', 0, 0, ':', 0
   );
-  const simd8<uint8_t> op_table_hi = simd8<uint8_t>::repeat_16(
+  const _simd8<uint8_t> op_table_hi = _simd8<uint8_t>::repeat_16(
     0, 0, 0, 0, 0, 0, '[', ']', 0, 0, 0, 0, 0, 0, '{', '}'
   );
   uint64_t ws = in.eq({
@@ -52652,13 +54585,13 @@ _simdjson_inline json_character_block json_character_block::classify(const simd:
   return { ws, op };
 }
 
-_simdjson_inline bool is_ascii(const simd8x64<uint8_t>& input) {
+_simdjson_inline bool is_ascii(const _simd8x64<uint8_t>& input) {
   return input.reduce_or().is_ascii();
 }
 
-_simdjson_inline simd8<uint8_t> must_be_2_3_continuation(const simd8<uint8_t> prev2, const simd8<uint8_t> prev3) {
-    simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
-    simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
+_simdjson_inline _simd8<uint8_t> must_be_2_3_continuation(const _simd8<uint8_t> prev2, const _simd8<uint8_t> prev3) {
+    _simd8<uint8_t> is_third_byte  = prev2.saturating_sub(0xe0u-0x80); // Only 111_____ will be >= 0x80
+    _simd8<uint8_t> is_fourth_byte = prev3.saturating_sub(0xf0u-0x80); // Only 1111____ will be >= 0x80
     return is_third_byte | is_fourth_byte;
 }
 
@@ -52689,25 +54622,27 @@ _simdjson_warn_unused error_code dom_parser_implementation::stage1(const uint8_t
 _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t len) const noexcept {
   return lasx::stage1::generic_validate_utf8(buf,len);
 }
-_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool replacement_char) const noexcept {
-  return lasx::stringparsing::parse_string(src, dst, replacement_char);
+
+_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
+    return lasx::stringparsing::parse_string(src, dst, allow_replacement);
 }
+
 _simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return lasx::atomparsing::is_valid_true_atom(src, len);
+    return lasx::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return lasx::atomparsing::is_valid_false_atom(src, len);
+    return lasx::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return lasx::atomparsing::is_valid_null_atom(src, len);
+    return lasx::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return lasx::numberparsing::parse_number(src, writer);
+    return lasx::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::stage2(dom::document &_doc) noexcept {
@@ -52727,29 +54662,31 @@ _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_wobbly_string(co
   return lasx::stringparsing::parse_wobbly_string(src, dst);
 }
 
+
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return lasx::atomparsing::is_valid_true_atom(src, len);
+    return lasx::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return lasx::atomparsing::is_valid_false_atom(src, len);
+    return lasx::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return lasx::atomparsing::is_valid_null_atom(src, len);
+    return lasx::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return lasx::numberparsing::parse_number(src, writer);
+    return lasx::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse(const uint8_t* _buf, size_t _len, dom::document& _doc, bool all) noexcept {
-  auto error = stage1(_buf, _len, stage1_mode::regular);
-  if (error) { return error; } if (!all) { return error_code(); }
-  return stage2(_doc);
+    auto error = stage1(_buf, _len, stage1_mode::regular);
+    if (error) { return error; } if (!all) { return error_code(); }
+    return stage2(_doc);
 }
+
 
 } // namespace lasx
 } // namespace _simdjson
@@ -52877,7 +54814,7 @@ namespace {
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 1;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return c == '"'; }
   _simdjson_inline bool has_backslash() { return c == '\\'; }
@@ -52891,6 +54828,24 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // store to dest unconditionally - we can overwrite the bits we don't like later
   dst[0] = src[0];
   return { src[0] };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 1;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits; }
+  _simdjson_inline int escape_index() { return 0; }
+
+  bool escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  dst[0] = src[0];
+  return { (src[0] == '\\') || (src[0] == '"') || (src[0] < 32) };
 }
 
 } // unnamed namespace
@@ -53275,19 +55230,23 @@ public:
   inline dom_parser_implementation &operator=(dom_parser_implementation &&other) noexcept;
   dom_parser_implementation(const dom_parser_implementation &) = delete;
   dom_parser_implementation &operator=(const dom_parser_implementation &) = delete;
-  virtual  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
 
-  virtual  _simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
-  virtual  _simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
-  virtual  _simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
-  virtual  _simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
+  _simdjson_warn_unused error_code parse(const uint8_t* buf, size_t len, dom::document& doc, bool all = true) noexcept final;
+  _simdjson_warn_unused error_code stage1(const uint8_t* buf, size_t len, stage1_mode partial) noexcept final;
+  _simdjson_warn_unused error_code stage2(dom::document& doc) noexcept final;
+  _simdjson_warn_unused error_code stage2_next(dom::document& doc) noexcept final;
+  _simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept final;
+  _simdjson_warn_unused uint8_t* parse_wobbly_string(const uint8_t* src, uint8_t* dst) const noexcept final;
+
+
   _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+
   _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
   _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
-  virtual  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
-  virtual inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
+  inline _simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
+  inline _simdjson_warn_unused error_code set_max_depth(size_t max_depth) noexcept final;
 private:
   _simdjson_inline _simdjson_warn_unused error_code set_capacity_stage1(size_t capacity);
 
@@ -53403,12 +55362,17 @@ struct implementation__simdjson_result_base {
    *
    * @param value The variable to assign the value to. May not be set if there is an error.
    */
-  _simdjson_inline error_code get(T &value) && noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code get(T &value) && noexcept;
 
   /**
    * The error.
    */
-  _simdjson_inline error_code error() const noexcept;
+  _simdjson_warn_unused _simdjson_inline error_code error() const noexcept;
+
+  /**
+   * Whether there is a value.
+   */
+  _simdjson_warn_unused _simdjson_inline bool has_value() const noexcept;
 
 #if _SIMDJSON_EXCEPTIONS
 
@@ -53417,6 +55381,16 @@ struct implementation__simdjson_result_base {
    *
    * @throw _simdjson_error if there was an error.
    */
+  _simdjson_inline T& operator*() &  noexcept(false);
+  _simdjson_inline T&& operator*() &&  noexcept(false);
+  /**
+   * Arrow operator to access members of the contained value.
+   *
+   * @throw _simdjson_error if there was an error.
+   */
+  _simdjson_inline T* operator->() noexcept(false);
+  _simdjson_inline const T* operator->() const noexcept(false);
+
   _simdjson_inline T& value() & noexcept(false);
 
   /**
@@ -53458,6 +55432,10 @@ struct implementation__simdjson_result_base {
    * the error() method returns a value that evaluates to false.
    */
   _simdjson_inline T&& value_unsafe() && noexcept;
+
+  using value_type = T;
+  using error_type = error_code;
+
 protected:
   /** users should never directly access first and second. **/
   T first{}; /** Users should never directly access 'first'. **/
@@ -53640,7 +55618,12 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
   // with a returned value of type value128 with a "low component" corresponding to the
   // 64-bit least significant bits of the product and with a "high component" corresponding
   // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+  _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index]);
+#else
   _simdjson::internal::value128 firstproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index]);
+#endif
+
   // Both i and power_of_five_128[index] have their most significant bit set to 1 which
   // implies that the either the most or the second most significant bit of the product
   // is 1. We pack values in this manner for efficiency reasons: it maximizes the use
@@ -53673,7 +55656,11 @@ _simdjson_inline bool compute_float_64(int64_t power, uint64_t i, bool negative,
     // with a returned value of type value128 with a "low component" corresponding to the
     // 64-bit least significant bits of the product and with a "high component" corresponding
     // to the 64-bit most significant bits of the product.
+#if _SIMDJSON_STATIC_REFLECTION
+    _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::powers_template<>::power_of_five_128[index + 1]);
+#else
     _simdjson::internal::value128 secondproduct = full_multiplication(i, _simdjson::internal::power_of_five_128[index + 1]);
+#endif
     firstproduct.low += secondproduct.high;
     if(secondproduct.high > firstproduct.low) { firstproduct.high++; }
     // As it has been proven by Noble Mushtak and Daniel Lemire in "Fast Number Parsing Without
@@ -53834,7 +55821,7 @@ _simdjson_inline bool is_digit(const uint8_t c) {
   return static_cast<uint8_t>(c - '0') <= 9;
 }
 
-_simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const uint8_t *const src, const uint8_t *&p, uint64_t &i, int64_t &exponent) {
   // we continue with the fiction that we have an integer. If the
   // floating point number is representable as x * 10^z for some integer
   // z that fits in 53 bits, then we will be able to convert back the
@@ -53862,7 +55849,7 @@ _simdjson_inline error_code parse_decimal_after_separator(_simdjson_unused const
   return SUCCESS;
 }
 
-_simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
+_simdjson_warn_unused _simdjson_inline error_code parse_exponent(_simdjson_unused const uint8_t *const src, const uint8_t *&p, int64_t &exponent) {
   // Exp Sign: -123.456e[-]78
   bool neg_exp = ('-' == *p);
   if (neg_exp || '+' == *p) { p++; } // Skip + as well
@@ -53951,7 +55938,7 @@ static error_code slow_float_parsing(_simdjson_unused const uint8_t * src, doubl
 
 /** @private */
 template<typename W>
-_simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code write_float(const uint8_t *const src, bool negative, uint64_t i, const uint8_t * start_digits, size_t digit_count, int64_t exponent, W &writer) {
   // If we frequently had to deal with long strings of digits,
   // we could extend our code by using a 128-bit integer instead
   // of a 64-bit integer. However, this is uncommon in practice.
@@ -54014,13 +56001,13 @@ _simdjson_inline error_code write_float(const uint8_t *const src, bool negative,
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer);
 
 // for performance analysis, it is sometimes  useful to skip parsing
 #ifdef _SIMDJSON_SKIPNUMBERPARSING
 
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const, W &writer) {
   writer.append_s64(0);        // always write zero
   return SUCCESS;              // always succeeds
 }
@@ -54046,7 +56033,7 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
 //
 // Our objective is accurate parsing (ULP of 0) at high speed.
 template<typename W>
-_simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
+_simdjson_warn_unused _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   //
   // Check for minus sign
   //
@@ -54120,7 +56107,16 @@ _simdjson_inline error_code parse_number(const uint8_t *const src, W &writer) {
   if (i > uint64_t(INT64_MAX)) {
     WRITE_UNSIGNED(i, src, writer);
   } else {
-    WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+    if(i == 0 && negative) {
+      // We have to write -0.0 instead of 0
+      WRITE_DOUBLE(-0.0, src, writer);
+    } else {
+      WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+    }
+#else
+  WRITE_INTEGER(negative ? (~i+1) : i, src, writer);
+#endif
   }
   if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return INVALID_NUMBER(src); }
   return SUCCESS;
@@ -54581,6 +56577,12 @@ _simdjson_unused _simdjson_inline _simdjson_result<number_type> get_number_type(
       if (_simdjson_unlikely(digit_count == 19 && memcmp(src, smaller_big_integer, 19) > 0)) {
         return number_type::big_integer;
       }
+#if _SIMDJSON_MINUS_ZERO_AS_FLOAT
+      if(digit_count == 1 && src[0] == '0') {
+        // We have to write -0.0 instead of 0
+        return number_type::floating_point_number;
+      }
+#endif
       return number_type::signed_integer;
     }
     // Let us check if we have a big integer (>=2**64).
@@ -54815,11 +56817,40 @@ _simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_resul
 }
 
 template<typename T>
-_simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
+_simdjson_warn_unused _simdjson_inline error_code implementation__simdjson_result_base<T>::error() const noexcept {
   return this->second;
 }
 
+
+template<typename T>
+_simdjson_warn_unused _simdjson_inline bool implementation__simdjson_result_base<T>::has_value() const noexcept {
+  return this->error() == SUCCESS;
+}
+
 #if _SIMDJSON_EXCEPTIONS
+
+template<typename T>
+_simdjson_inline T& implementation__simdjson_result_base<T>::operator*() &  noexcept(false) {
+  return this->value();
+}
+
+template<typename T>
+_simdjson_inline T&& implementation__simdjson_result_base<T>::operator*() &&  noexcept(false) {
+  return std::forward<implementation__simdjson_result_base<T>>(*this).value();
+}
+
+template<typename T>
+_simdjson_inline T* implementation__simdjson_result_base<T>::operator->() noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
+
+
+template<typename T>
+_simdjson_inline const T* implementation__simdjson_result_base<T>::operator->() const noexcept(false) {
+  if (this->error()) { throw _simdjson_error(this->error()); }
+  return &this->first;
+}
 
 template<typename T>
 _simdjson_inline T& implementation__simdjson_result_base<T>::value() & noexcept(false) {
@@ -54918,13 +56949,13 @@ public:
   ) const noexcept final;
   _simdjson_warn_unused error_code minify(const uint8_t *buf, size_t len, uint8_t *dst, size_t &dst_len) const noexcept final;
   _simdjson_warn_unused bool validate_utf8(const char *buf, size_t len) const noexcept final;
-  _simdjson_warn_unused virtual uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
+_simdjson_warn_unused uint8_t* parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_true_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused bool is_valid_false_atom(const uint8_t* src, size_t len) const noexcept;
 
-  _simdjson_warn_unused virtual bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept ;
-  _simdjson_warn_unused virtual error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept ;
+  _simdjson_warn_unused bool is_valid_null_atom(const uint8_t* src, size_t len) const noexcept;
+  _simdjson_warn_unused error_code parse_number(const uint8_t* src, uint64_t* buf) const noexcept;
 };
 
 } // namespace fallback
@@ -55027,7 +57058,7 @@ namespace {
 struct backslash_and_quote {
 public:
   static constexpr uint32_t BYTES_PROCESSED = 1;
-  _simdjson_inline static backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
+  _simdjson_inline backslash_and_quote copy_and_find(const uint8_t *src, uint8_t *dst);
 
   _simdjson_inline bool has_quote_first() { return c == '"'; }
   _simdjson_inline bool has_backslash() { return c == '\\'; }
@@ -55041,6 +57072,24 @@ _simdjson_inline backslash_and_quote backslash_and_quote::copy_and_find(const ui
   // store to dest unconditionally - we can overwrite the bits we don't like later
   dst[0] = src[0];
   return { src[0] };
+}
+
+
+struct escaping {
+  static constexpr uint32_t BYTES_PROCESSED = 1;
+  _simdjson_inline static escaping copy_and_find(const uint8_t *src, uint8_t *dst);
+
+  _simdjson_inline bool has_escape() { return escape_bits; }
+  _simdjson_inline int escape_index() { return 0; }
+
+  bool escape_bits;
+}; // struct escaping
+
+
+
+_simdjson_inline escaping escaping::copy_and_find(const uint8_t *src, uint8_t *dst) {
+  dst[0] = src[0];
+  return { (src[0] == '\\') || (src[0] == '"') || (src[0] < 32) };
 }
 
 } // unnamed namespace
@@ -55249,6 +57298,7 @@ _simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &pa
 /* end file generic/stage1/find_next_document_index.h for fallback */
 /* including generic/stage2/stringparsing.h for fallback: #include <generic/stage2/stringparsing.h> */
 /* begin file generic/stage2/stringparsing.h for fallback */
+#include <cstdint>
 #ifndef _SIMDJSON_SRC_GENERIC_STAGE2_STRINGPARSING_H
 
 /* amalgamation skipped (editor-only): #ifndef _SIMDJSON_CONDITIONAL_INCLUDE */
@@ -55401,7 +57451,8 @@ _simdjson_inline bool handle_unicode_codepoint_wobbly(const uint8_t **src_ptr,
 _simdjson_warn_unused _simdjson_inline uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) {
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -55446,7 +57497,8 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
   // It is not ideal that this function is nearly identical to parse_string.
   while (1) {
     // Copy the next n bytes, and find the backslash and quote in them.
-    auto bs_quote = backslash_and_quote::copy_and_find(src, dst);
+    auto b = backslash_and_quote{};
+    auto bs_quote = b.copy_and_find(src, dst);
     // If the next thing is the end quote, copy and return
     if (bs_quote.has_quote_first()) {
       // we encountered quotes first. Move dst to point to quotes and exit
@@ -55488,6 +57540,7 @@ _simdjson_warn_unused _simdjson_inline uint8_t *parse_wobbly_string(const uint8_
 }
 
 } // namespace stringparsing
+
 } // unnamed namespace
 } // namespace fallback
 } // namespace _simdjson
@@ -56454,10 +58507,78 @@ _simdjson_inline void validate_utf8_character() {
   idx += 4;
 }
 
+static const uint8_t CHAR_TYPE_SPACE     = 1 << 0;
+static const uint8_t CHAR_TYPE_OPERATOR  = 1 << 1;
+static const uint8_t CHAR_TYPE_ESC_ASCII = 1 << 2;
+static const uint8_t CHAR_TYPE_NON_ASCII = 1 << 3;
+
+const uint8_t char_table[256] = {
+  0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04,
+  0x04, 0x05, 0x05, 0x04, 0x04, 0x05, 0x04, 0x04,
+  0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04,
+  0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04,
+  0x01, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x02, 0x04, 0x02, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08
+};
+
+_simdjson_inline bool char_is_type(uint8_t c, uint8_t type) {
+  return (char_table[c] & type);
+}
+
+_simdjson_inline bool char_is_space(uint8_t c) {
+  return char_is_type(c, CHAR_TYPE_SPACE);
+}
+
+_simdjson_inline bool char_is_operator(uint8_t c) {
+  return char_is_type(c, CHAR_TYPE_OPERATOR);
+}
+
+_simdjson_inline bool char_is_space_or_operator(uint8_t c) {
+  return char_is_type(c, CHAR_TYPE_SPACE | CHAR_TYPE_OPERATOR);
+}
+
+_simdjson_inline bool char_is_ascii_stop(uint8_t c) {
+  return char_is_type(c, CHAR_TYPE_ESC_ASCII | CHAR_TYPE_NON_ASCII);
+}
+
 // Returns true if the string is unclosed.
 _simdjson_inline bool validate_string() {
   idx++; // skip first quote
-  while (idx < len && buf[idx] != '"') {
+  while (idx < len) {
+    do {
+      if (char_is_ascii_stop(buf[idx])) { break; }
+      idx++;
+    } while (idx < len);
+    if (idx >= len) { return true; }
+    if (buf[idx] == '"') {
+      return false;
+    }
     if (buf[idx] == '\\') {
       idx += 2;
     } else if (_simdjson_unlikely(buf[idx] & 0x80)) {
@@ -56471,43 +58592,31 @@ _simdjson_inline bool validate_string() {
   return false;
 }
 
-_simdjson_inline bool is_whitespace_or_operator(uint8_t c) {
-  switch (c) {
-    case '{': case '}': case '[': case ']': case ',': case ':':
-    case ' ': case '\r': case '\n': case '\t':
-      return true;
-    default:
-      return false;
-  }
-}
-
 //
 // Parse the entire input in STEP_SIZE-byte chunks.
 //
-_simdjson_inline error_code scan() {
+_simdjson_warn_unused _simdjson_inline error_code scan() {
   bool unclosed_string = false;
   for (;idx<len;idx++) {
-    switch (buf[idx]) {
-      // String
-      case '"':
-        add_structural();
-        unclosed_string |= validate_string();
-        break;
-      // Operator
-      case '{': case '}': case '[': case ']': case ',': case ':':
-        add_structural();
-        break;
-      // Whitespace
-      case ' ': case '\r': case '\n': case '\t':
-        break;
-      // Primitive or invalid character (invalid characters will be checked in stage 2)
-      default:
-        // Anything else, add the structural and go until we find the next one
-        add_structural();
-        while (idx+1<len && !is_whitespace_or_operator(buf[idx+1])) {
-          idx++;
-        };
-        break;
+    do {
+      if (!char_is_space(buf[idx])) { break; }
+      idx++;
+    } while (idx < len);
+    if (idx >= len) { break; }
+    // String
+    if (buf[idx] == '"') {
+      add_structural();
+      unclosed_string |= validate_string();
+    // Operator
+    } else if (char_is_operator(buf[idx])) {
+      add_structural();
+    // Primitive or invalid character (invalid characters will be checked in stage 2)
+    } else {
+      // Anything else, add the structural and go until we find the next one
+      add_structural();
+      while (idx+1<len && !char_is_space_or_operator(buf[idx+1])) {
+        idx++;
+      };
     }
   }
   // We pad beyond.
@@ -56703,6 +58812,31 @@ _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t
   return true;
 }
 
+
+_simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
+   return fallback::stringparsing::parse_string(src, dst, allow_replacement);
+}
+
+
+_simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
+    return fallback::atomparsing::is_valid_true_atom(src, len);
+}
+
+_simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
+    return fallback::atomparsing::is_valid_false_atom(src, len);
+}
+
+_simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
+    return fallback::atomparsing::is_valid_null_atom(src, len);
+}
+
+_simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
+    stage2::tape_writer writer{ buf };
+
+    return fallback::numberparsing::parse_number(src, writer);
+}
+
+
 } // namespace fallback
 } // namespace _simdjson
 
@@ -56712,28 +58846,6 @@ _simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t
 
 namespace _simdjson {
 namespace fallback {
-
-    _simdjson_warn_unused uint8_t* implementation::parse_string(const uint8_t* src, uint8_t* dst, bool allow_replacement) const noexcept {
-        return fallback::stringparsing::parse_string(src, dst, allow_replacement);
-    }
-
-    _simdjson_warn_unused bool implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-        return  fallback::atomparsing::is_valid_true_atom(src, len);
-    }
-
-    _simdjson_warn_unused bool implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-        return  fallback::atomparsing::is_valid_false_atom(src, len);
-    }
-
-    _simdjson_warn_unused bool implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-        return fallback::atomparsing::is_valid_null_atom(src, len);
-    }
-
-    _simdjson_warn_unused error_code implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-        stage2::tape_writer writer{ buf };
-
-        return fallback::numberparsing::parse_number(src, writer);
-    }
 
 _simdjson_warn_unused error_code dom_parser_implementation::stage2(dom::document &_doc) noexcept {
   return stage2::tape_builder::parse_document<false>(*this, _doc);
@@ -56750,30 +58862,28 @@ _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_string(const uin
 
 _simdjson_warn_unused uint8_t *dom_parser_implementation::parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept {
   return fallback::stringparsing::parse_wobbly_string(src, dst);
-}
-
-_simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
-  return fallback::atomparsing::is_valid_true_atom(src, len);
+}_simdjson_warn_unused bool dom_parser_implementation::is_valid_true_atom(const uint8_t* src, size_t len) const noexcept {
+    return fallback::atomparsing::is_valid_true_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_false_atom(const uint8_t* src, size_t len) const noexcept {
-  return fallback::atomparsing::is_valid_false_atom(src, len);
+    return fallback::atomparsing::is_valid_false_atom(src, len);
 }
 
 _simdjson_warn_unused bool dom_parser_implementation::is_valid_null_atom(const uint8_t* src, size_t len) const noexcept {
-  return fallback::atomparsing::is_valid_null_atom(src, len);
+    return fallback::atomparsing::is_valid_null_atom(src, len);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse_number(const uint8_t* src, uint64_t* buf) const noexcept {
-  stage2::tape_writer writer{ buf };
+    stage2::tape_writer writer{ buf };
 
-  return fallback::numberparsing::parse_number(src, writer);
+    return fallback::numberparsing::parse_number(src, writer);
 }
 
 _simdjson_warn_unused error_code dom_parser_implementation::parse(const uint8_t* _buf, size_t _len, dom::document& _doc, bool all) noexcept {
-  auto error = stage1(_buf, _len, stage1_mode::regular);
-  if (error) { return error; } if (!all) { return error_code(); }
-  return stage2(_doc);
+    auto error = stage1(_buf, _len, stage1_mode::regular);
+    if (error) { return error; } if (!all) { return error_code(); }
+    return stage2(_doc);
 }
 
 } // namespace fallback

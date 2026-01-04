@@ -4406,7 +4406,7 @@ public:
 				return { false, 0 };
 			}
 
-			const auto& buf = test_.raw_buf();
+			const auto& buf = test_.raw_buf().get();
 			const auto buf_len = test_.raw_len();
 
 			auto* simdjson_imple_ = test_.raw_implementation().get();
@@ -4726,7 +4726,7 @@ public:
 
 				return { false, 0 };
 			}
-			const auto& buf = test_.raw_buf();
+			const auto& buf = test_.raw_buf().get();
 			const auto buf_len = test_.raw_len();
 			auto* simdjson_imple_ = test_.raw_implementation().get();
 

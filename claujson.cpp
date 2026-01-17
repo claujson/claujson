@@ -723,8 +723,8 @@ namespace claujson {
 	}
 
 	claujson_inline bool ConvertNumber(claujson::_Value& data, const char* text, uint64_t len, bool isFirst) {
-
-		std::unique_ptr<uint8_t[]> copy;
+		thread_local uint64_t copy_len = 0;
+		thread_local std::unique_ptr<uint8_t[]> copy;
 
 		uint64_t temp[2] = { 0 };
 
@@ -733,7 +733,10 @@ namespace claujson {
 
 		// todo : number -> fixed size? -> len <- limit... -> no new!
 		if (isFirst) { // if this case may be root number -> chk.. visit_root_number. in tape_builder in simdjson.cpp
-			copy = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[len + _simdjson::_SIMDJSON_PADDING]);
+			if (copy_len < len) {
+				copy = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[len + _simdjson::_SIMDJSON_PADDING]);
+				copy_len = len;
+			}
 			if (copy.get() == nullptr) { return false; } // ERROR("Error in Convert for new"); } // cf) new Json?
 			std::memcpy(copy.get(), text, len);
 			std::memset(copy.get() + len, ' ', _simdjson::_SIMDJSON_PADDING);

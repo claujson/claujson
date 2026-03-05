@@ -1615,37 +1615,37 @@ public:
 
 				TokenTemp key;
 
-				for (uint64_t i = 0; i < token_arr_len; ++i) {
-
-					const char type = (buf[imple->structural_indexes[token_arr_start + i]]);
+				auto* p_start = &imple->structural_indexes[token_arr_start];
+				auto* p_end = &imple->structural_indexes[token_arr_start + token_arr_len];
+				for (auto* p = &imple->structural_indexes[token_arr_start]; p != p_end; ++p) {
+					const char type = (buf[*p]);
 
 					switch (type) {
 					case ',':
 						continue;
 					default:
 					{
-						bool is_key = token_arr_start + i + 1 < imple->n_structural_indexes && buf[imple->structural_indexes[token_arr_start + i + 1]] == ':';
+						bool is_key = p + 1 < p_end && buf[*(p + 1)] == ':';
 
 						{
 							TokenTemp data;
 
-							data.buf_idx = imple->structural_indexes[token_arr_start + i];
-							data.token_idx = token_arr_start + i;
-
-							if (token_arr_start + i + 1 < imple->n_structural_indexes) {
-								data.next_buf_idx = imple->structural_indexes[token_arr_start + i + 1];
+							data.buf_idx = *p;
+							data.token_idx = token_arr_start + (p - p_start);
+							// p - p_start <- idx
+							if ((p - p_start) < imple->n_structural_indexes) {
+								data.next_buf_idx = *(p + 1);
 							}
 							else {
 								data.next_buf_idx = buf_len;
 							}
-
 
 							if (is_key) {
 								data.is_key = true;
 
 								key = std::move(data);
 
-								++i; // pass key
+								++p; // pass key
 							}
 							else {
 

@@ -326,7 +326,7 @@ namespace claujson {
 
 
 	void Object::MergeWith(Array* j, int start_offset) {
-		ERROR("Object::MergeWith Error");
+		CLAUJSON_ERROR("Object::MergeWith Error");
 		return;
 	}
 
@@ -359,7 +359,7 @@ namespace claujson {
 		auto* x = j;
 
 		if (x->arr_vec.empty() == false) { // not object?
-			ERROR("partial json is not object");
+			CLAUJSON_ERROR("partial json is not object");
 		}
 
 		uint64_t len = j->get_data_size();
@@ -399,15 +399,15 @@ namespace claujson {
 				claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e);
 
 				if (e) {
-					ERROR("Error in add_item_type");
+					CLAUJSON_ERROR("Error in add_item_type");
 				}
 				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e);
 				if (e) {
-					ERROR("Error in add_item_type");
+					CLAUJSON_ERROR("Error in add_item_type");
 				}
 
 				if (!temp.is_str()) {
-					ERROR("Error in add_item_type, key is not string");
+					CLAUJSON_ERROR("Error in add_item_type, key is not string");
 				}
 
 				obj_data.emplace_back(std::move(temp), std::move(temp2));
@@ -419,7 +419,7 @@ namespace claujson {
 		// error
 
 		log << warn << "errr..";
-		ERROR("Error Object::add_item_type");
+		CLAUJSON_ERROR("Error Object::add_item_type");
 	}
 
 	void Object::add_user_type(_ValueType type
@@ -428,7 +428,7 @@ namespace claujson {
 		// error
 
 		log << warn << "errr..";
-		ERROR("Error Object::add_user_type");
+		CLAUJSON_ERROR("Error Object::add_user_type");
 		return;
 	}
 
@@ -443,11 +443,11 @@ namespace claujson {
 
 			claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e);
 			if (e) {
-				ERROR("Error in add_user_type");
+				CLAUJSON_ERROR("Error in add_user_type");
 			}
 
 			if (temp.is_str() == false) {
-				ERROR("Error in add_item_type, key is not string");
+				CLAUJSON_ERROR("Error in add_item_type, key is not string");
 			}
 
 			if (type == _ValueType::OBJECT) {

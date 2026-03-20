@@ -712,7 +712,7 @@ namespace claujson {
 		}
 		auto* x = _simdjson::parse_string((const uint8_t*)text + 1, string_buf, false);
 		if (x == nullptr) {
-			return false; // ERROR("Error in Convert for string");
+			return false; // CLAUJSON_ERROR("Error in Convert for string");
 		}
 		else {
 			*x = '\0';
@@ -737,7 +737,7 @@ namespace claujson {
 				copy = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[len + _simdjson::_SIMDJSON_PADDING]);
 				copy_len = len;
 			}
-			if (copy.get() == nullptr) { return false; } // ERROR("Error in Convert for new"); } // cf) new Json?
+			if (copy.get() == nullptr) { return false; } // CLAUJSON_ERROR("Error in Convert for new"); } // cf) new Json?
 			std::memcpy(copy.get(), text, len);
 			std::memset(copy.get() + len, ' ', _simdjson::_SIMDJSON_PADDING);
 			value = copy.get();
@@ -748,7 +748,7 @@ namespace claujson {
 		if (x != _simdjson::SUCCESS) {
 			log << warn << StringView((char*)value, 20) << "\n";
 			log << warn << "parse number error. " << x << "\n";
-			return false; //ERROR("parse number error. ");
+			return false; //CLAUJSON_ERROR("parse number error. ");
 			//throw "Error in Convert to parse number";
 		}
 
@@ -807,7 +807,7 @@ namespace claujson {
 		case 't':
 		{
 			if (!_simdjson::is_valid_true_atom(reinterpret_cast<uint8_t*>(&buf[buf_idx]), next_buf_idx - buf_idx)) {
-				goto ERR; //ERROR("Error in Convert for true");
+				goto ERR; //CLAUJSON_ERROR("Error in Convert for true");
 			}
 
 			data.set_bool(true);
@@ -815,14 +815,14 @@ namespace claujson {
 		break;
 		case 'f':
 			if (!_simdjson::is_valid_false_atom(reinterpret_cast<uint8_t*>(&buf[buf_idx]), next_buf_idx - buf_idx)) {
-				goto ERR; //ERROR("Error in Convert for false");
+				goto ERR; //CLAUJSON_ERROR("Error in Convert for false");
 			}
 
 			data.set_bool(false);
 			break;
 		case 'n':
 			if (!_simdjson::is_valid_null_atom(reinterpret_cast<uint8_t*>(&buf[buf_idx]), next_buf_idx - buf_idx)) {
-				goto ERR; //ERROR("Error in Convert for null");
+				goto ERR; //CLAUJSON_ERROR("Error in Convert for null");
 			}
 
 			data.set_null();
@@ -830,7 +830,7 @@ namespace claujson {
 
 		default:
 			log << warn << "convert error : " << (int)buf[buf_idx] << " " << buf[buf_idx] << "\n";
-			goto ERR; //ERROR("convert Error");
+			goto ERR; //CLAUJSON_ERROR("convert Error");
 			//throw "Error in Convert : not expected";
 		}
 
@@ -842,7 +842,7 @@ namespace claujson {
 		//catch (const char* str) {
 	ERR:
 		//log << warn << str << "\n";
-		//ERROR(str);
+		//CLAUJSON_ERROR(str);
 		err = true;
 		return data;
 	}
@@ -1471,10 +1471,10 @@ public:
 				}
 
 				if (_next.is_array() && _ut.is_object()) {
-					ERROR("Error in Merge, next is array but child? is object");
+					CLAUJSON_ERROR("Error in Merge, next is array but child? is object");
 				}
 				if (_next.is_object() && _ut.is_array()) {
-					ERROR("Error in Merge, next is object but child? is array");
+					CLAUJSON_ERROR("Error in Merge, next is object but child? is array");
 				}
 
 				int start_offset = 0;
@@ -1534,10 +1534,10 @@ public:
 				class StructuredPtr _next = next;
 
 				if (_next.is_array() && _ut.is_object()) {
-					ERROR("Error in Merge, next is array but child? is object");
+					CLAUJSON_ERROR("Error in Merge, next is array but child? is object");
 				}
 				if (_next.is_object() && _ut.is_array()) {
-					ERROR("Error in Merge, next is object but child? is array");
+					CLAUJSON_ERROR("Error in Merge, next is object but child? is array");
 				}
 
 				if (ut_next && _ut == (*ut_next)) {
@@ -2022,7 +2022,7 @@ public:
 			catch (int err) {
 
 				log << warn << "merge error " << err << "\n";
-				//ERROR("Merge Error"sv);
+				//CLAUJSON_ERROR("Merge Error"sv);
 				for (uint64_t i = 0; i < __global.size(); ++i) {
 					if (__global[i]) {
 						__global[i].Delete();
@@ -2037,7 +2037,7 @@ public:
 			catch (const char* err) {
 
 				log << warn << err << "\n";
-				//ERROR("Merge Error"sv);
+				//CLAUJSON_ERROR("Merge Error"sv);
 				for (uint64_t i = 0; i < __global.size(); ++i) {
 					if (__global[i]) {
 						__global[i].Delete();
@@ -2060,7 +2060,7 @@ public:
 					_global.Delete();
 				}
 
-				//ERROR("Internal Error"sv);
+				//CLAUJSON_ERROR("Internal Error"sv);
 				return false;
 			}
 
@@ -4404,7 +4404,7 @@ public:
 				log << warn << "stage1 error : ";
 				log << warn << x.error() << "\n";
 
-				//ERROR(_simdjson::error_message(x.error()));
+				//CLAUJSON_ERROR(_simdjson::error_message(x.error()));
 
 				return { false, 0 };
 			}
@@ -4674,7 +4674,7 @@ public:
 				log << warn << "stage1 error : ";
 				log << warn << x.error() << "\n";
 
-				//ERROR(_simdjson::error_message(x.error()));
+				//CLAUJSON_ERROR(_simdjson::error_message(x.error()));
 
 				return { false, 0 };
 			}

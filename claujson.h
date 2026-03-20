@@ -178,6 +178,10 @@ namespace claujson {
 
 		bool is_str() const;
 
+		bool is_string() const {
+			return is_str();
+		}
+
 		int64_t get_integer() const {
 			return int_val();
 		}
@@ -704,7 +708,7 @@ namespace claujson {
 #define claujson_inline _simdjson_inline
 
 
-#define ERROR(msg) \
+#define CLAUJSON_ERROR(msg) \
 	do { \
 		throw msg; \
 		/* error.make(__LINE__, StringView(msg)); */ \

@@ -255,13 +255,13 @@ namespace claujson {
 		}
 	}
 	void Array::MergeWith(Object* j, int start_offset) {
-		ERROR("Array::MergeWith Error");
+		CLAUJSON_ERROR("Array::MergeWith Error");
 	}
 	void Array::MergeWith(PartialJson* j, int start_offset) {
 		auto* x = j;
 
 		if (x->obj_data.empty() == false) { // not object?
-			ERROR("partial json is not array");
+			CLAUJSON_ERROR("partial json is not array");
 		}
 
 		uint64_t len = j->get_data_size();
@@ -294,7 +294,7 @@ namespace claujson {
 
 		// error
 		log << warn << "error..";
-		ERROR("Error Array::add_item_type");
+		CLAUJSON_ERROR("Error Array::add_item_type");
 	}
 
 	void Array::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
@@ -306,7 +306,7 @@ namespace claujson {
 				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e);
 				if (e) {
 
-					ERROR("Error in add_item_type");
+					CLAUJSON_ERROR("Error in add_item_type");
 				}
 				arr_vec.emplace_back(std::move(temp2));
 			}
@@ -317,7 +317,7 @@ namespace claujson {
 
 	) {
 		log << warn << "error";
-		ERROR("Array::add_user_type1");
+		CLAUJSON_ERROR("Array::add_user_type1");
 	}
 
 	void Array::add_user_type(_ValueType type

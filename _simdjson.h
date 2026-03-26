@@ -40626,7 +40626,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // and divisions by approximately half for large numbers.
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       unsigned_type pv = static_cast<unsigned_type>(v);
       size_t dc = internal::digit_count(pv);
       char *write_pointer = buffer.get() + position + dc - 1;
@@ -40662,7 +40662,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // Same 4-digit batching as unsigned path for signed integers
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       bool negative = v < 0;
       unsigned_type pv = static_cast<unsigned_type>(v);
       if (negative) {
@@ -45300,7 +45300,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // and divisions by approximately half for large numbers.
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       unsigned_type pv = static_cast<unsigned_type>(v);
       size_t dc = internal::digit_count(pv);
       char *write_pointer = buffer.get() + position + dc - 1;
@@ -45336,7 +45336,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // Same 4-digit batching as unsigned path for signed integers
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       bool negative = v < 0;
       unsigned_type pv = static_cast<unsigned_type>(v);
       if (negative) {
@@ -47871,7 +47871,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // and divisions by approximately half for large numbers.
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       unsigned_type pv = static_cast<unsigned_type>(v);
       size_t dc = internal::digit_count(pv);
       char *write_pointer = buffer.get() + position + dc - 1;
@@ -47907,7 +47907,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // Same 4-digit batching as unsigned path for signed integers
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       bool negative = v < 0;
       unsigned_type pv = static_cast<unsigned_type>(v);
       if (negative) {
@@ -50557,7 +50557,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // and divisions by approximately half for large numbers.
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       unsigned_type pv = static_cast<unsigned_type>(v);
       size_t dc = internal::digit_count(pv);
       char *write_pointer = buffer.get() + position + dc - 1;
@@ -50593,7 +50593,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // Same 4-digit batching as unsigned path for signed integers
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       bool negative = v < 0;
       unsigned_type pv = static_cast<unsigned_type>(v);
       if (negative) {
@@ -53560,7 +53560,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // and divisions by approximately half for large numbers.
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       unsigned_type pv = static_cast<unsigned_type>(v);
       size_t dc = internal::digit_count(pv);
       char *write_pointer = buffer.get() + position + dc - 1;
@@ -53596,7 +53596,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // Same 4-digit batching as unsigned path for signed integers
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       bool negative = v < 0;
       unsigned_type pv = static_cast<unsigned_type>(v);
       if (negative) {
@@ -56037,7 +56037,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // and divisions by approximately half for large numbers.
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       unsigned_type pv = static_cast<unsigned_type>(v);
       size_t dc = internal::digit_count(pv);
       char *write_pointer = buffer.get() + position + dc - 1;
@@ -56073,7 +56073,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // Same 4-digit batching as unsigned path for signed integers
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       bool negative = v < 0;
       unsigned_type pv = static_cast<unsigned_type>(v);
       if (negative) {
@@ -58537,7 +58537,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // and divisions by approximately half for large numbers.
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       unsigned_type pv = static_cast<unsigned_type>(v);
       size_t dc = internal::digit_count(pv);
       char *write_pointer = buffer.get() + position + dc - 1;
@@ -58573,7 +58573,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // Same 4-digit batching as unsigned path for signed integers
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       bool negative = v < 0;
       unsigned_type pv = static_cast<unsigned_type>(v);
       if (negative) {
@@ -61041,7 +61041,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // and divisions by approximately half for large numbers.
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       unsigned_type pv = static_cast<unsigned_type>(v);
       size_t dc = internal::digit_count(pv);
       char *write_pointer = buffer.get() + position + dc - 1;
@@ -61077,7 +61077,7 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
     // Same 4-digit batching as unsigned path for signed integers
     constexpr size_t max_number_size = 20;
     if (capacity_check(max_number_size)) {
-      using unsigned_type = typename std::make_unsigned<number_type>::type;
+      using unsigned_type = typename safe_unsigned<number_type>::type;
       bool negative = v < 0;
       unsigned_type pv = static_cast<unsigned_type>(v);
       if (negative) {

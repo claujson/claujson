@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.11.0)
 # 프로젝트 정보
 project(
   claujson
-  VERSION 0.25.0 #
+  VERSION 0.29.0 #
   DESCRIPTION "claujson"
   LANGUAGES CXX)
 
@@ -31,18 +31,6 @@ set(INCLUDE_DIR ${ROOT}) # ${ROOT}/_deps/rapidjson-src/include)
 add_library(${LIB_NAME} STATIC ${SOURCE_DIR}/claujson.cpp ${SOURCE_DIR}/_simdjson.cpp ${SOURCE_DIR}/claujson_array.cpp ${SOURCE_DIR}/claujson_object.cpp ${SOURCE_DIR}/claujson_partialjson.cpp ${SOURCE_DIR}/claujson_value.cpp) 
 add_library(${LIB_NAME14} STATIC ${SOURCE_DIR}/claujson.cpp ${SOURCE_DIR}/_simdjson.cpp ${SOURCE_DIR}/claujson_array.cpp ${SOURCE_DIR}/claujson_object.cpp ${SOURCE_DIR}/claujson_partialjson.cpp ${SOURCE_DIR}/claujson_value.cpp) 
  
-include(FetchContent)
-
-FetchContent_Declare(
-  fmt
-  GIT_REPOSITORY https://github.com/fmtlib/fmt
-  GIT_TAG        e69e5f977d458f2650bb346dadf2ad30c5320281) # 10.2.1
-FetchContent_MakeAvailable(fmt)
-
-# header..
-target_include_directories(${LIB_NAME}  PUBLIC ${INCLUDE_DIR} PRIVATE ${fmt_SOURCE_DIR}/include)
-target_include_directories(${LIB_NAME14} PUBLIC ${INCLUDE_DIR} PRIVATE ${fmt_SOURCE_DIR}/include)
-
 
 if (UNIX) 
         target_compile_options(${LIB_NAME} PRIVATE -m64 -std=c++2a -march=native -pthread -Wno-narrowing -Wextra -O2)
@@ -101,12 +89,12 @@ endif()
 
 
 if (UNIX)
-	target_link_libraries(${LIB_NAME} PRIVATE fmt::fmt pthread)
-	target_link_libraries(${LIB_NAME14} PRIVATE fmt::fmt pthread)
+	target_link_libraries(${LIB_NAME} PRIVATE pthread)
+	target_link_libraries(${LIB_NAME14} PRIVATE  pthread)
 	
 elseif (MSVC)
-	target_link_libraries(${LIB_NAME} PRIVATE fmt::fmt  )
-	target_link_libraries(${LIB_NAME14} PRIVATE fmt::fmt  )
+	target_link_libraries(${LIB_NAME} PRIVATE  )
+	target_link_libraries(${LIB_NAME14} PRIVATE  )
   
 	
 endif()

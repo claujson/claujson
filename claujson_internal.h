@@ -11,25 +11,38 @@
 #include <cstring>
 #include <cstdint> // uint64_t? int64_t?
 
+#include "_simdjson.h" // modified simdjson 
 
-template <class From, class To>
-inline To Static_Cast(From x) {
-	To temp = static_cast<To>(x);
-	bool valid = static_cast<From>(temp) == x;
-	if (!valid) {
-		throw std::runtime_error("static cast error");
+
+using StringView = std::string_view;
+
+#if __cpp_lib_string_view
+using namespace std::literals::string_view_literals;
+#endif
+
+namespace claujson {
+
+	template <class From, class To>
+	inline To Static_Cast(From x, bool& e) {
+		e = false;
+		To temp = static_cast<To>(x);
+		bool valid = static_cast<From>(temp) == x;
+		if (!valid) {
+			e = true;
+		}
+		return temp;
 	}
-	return temp;
+
 }
 
 
-
+/*
 #if __cpp_lib_string_view
 #include <string_view>
 using namespace std::literals::string_view_literals;
 namespace claujson {
 	using StringView = std::string_view;
-}
+
 
 #else
 
@@ -40,7 +53,7 @@ namespace claujson {
 
 		StringView(const std::string& str) : m_str(str.data()), m_len(str.size()) {}
 		explicit StringView(const char* str) : m_str(str) { m_len = strlen(str); }
-		explicit StringView(const char* str, size_t len) : m_str(str), m_len(len) {}
+		explicit StringView(const char* str, uint64_t len) : m_str(str), m_len(len) {}
 		StringView(const StringView& other) {
 			m_str = other.m_str;
 			m_len = other.m_len;
@@ -89,11 +102,11 @@ namespace claujson {
 		}
 	private:
 		const char* m_str;
-		size_t m_len;
+		uint64_t m_len;
 	public:
 		static const uint64_t npos;
 
-		friend std::ostream& operator<<(std::ostream& stream, const claujson::StringView& sv) {
+		friend std::ostream& operator<<(std::ostream& stream, const StringView& sv) {
 			stream << sv.data();
 			return stream;
 		}
@@ -132,12 +145,13 @@ namespace claujson {
 	};
 }
 
-claujson::StringView operator""sv(const char* str, size_t sz);
-bool operator==(const std::string& str, claujson::StringView sv);
+StringView operator""sv(const char* str, uint64_t sz);
+bool operator==(const std::string& str, StringView sv);
 
 
 
 #endif
+*/
 
 
 

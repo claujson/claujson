@@ -7,21 +7,22 @@
 #include <execution>
 #include <array>
 
-#include "fmt/format.h"
-#include "fmt/compile.h"
+//#include "fmt/format.h"
+//#include "fmt/compile.h"
 
-#include <charconv>
+//#include <charconv>
+
 
 #if __cpp_lib_string_view
 
 #else
 
-	claujson::StringView operator""sv(const char* str, size_t sz) {
-		return claujson::StringView(str, sz);
+	StringView operator""sv(const char* str, size_t sz) {
+		return StringView(str, sz);
 	}
 
-	bool operator==(const std::string& str, claujson::StringView sv) {
-		return claujson::StringView(str.data(), str.size()) == sv;
+	bool operator==(const std::string& str, StringView sv) {
+		return StringView(str.data(), str.size()) == sv;
 	}
 
 #endif
@@ -33,7 +34,7 @@
 #if __cpp_lib_string_view
 
 #else
-		const uint64_t StringView::npos = -1;
+		//const uint64_t StringView::npos = -1;
 #endif
 
 		Log::Info info;
@@ -961,7 +962,8 @@ namespace claujson {
 class StrStream {
 private:
 	//std::string m_buffer;
-	fmt::memory_buffer m_buffer;
+	//fmt::memory_buffer m_buffer;
+	_simdjson::builder::string_builder m_buffer;
 	//char temp[4096];
 public:
 	StrStream() {
@@ -971,41 +973,117 @@ public:
 public:
 
 	const char* buf() const {
-		return m_buffer.data();
-	}
-	uint64_t buf_size() const {
-		return m_buffer.size();
+		return m_buffer.view()->data();
 	}
 
-	StrStream& add_char(char x) {
-		m_buffer.push_back(x);
+	uint64_t buf_size() const {
+		return m_buffer.view()->size();
+	}
+
+	StrStream& add_start_object(bool pretty) {
+		if (pretty) {
+			m_buffer.append(' ');
+			m_buffer.start_object();
+			m_buffer.append(' ');
+		}
+		else {
+			m_buffer.start_object();
+		}
+		return *this;
+	}
+
+	StrStream& add_start_array(bool pretty) {
+		if (pretty) {
+			m_buffer.append(' ');
+			m_buffer.start_array();
+			m_buffer.append(' ');
+		}
+		else {
+			m_buffer.start_array();
+		}
+		return *this;
+	}
+	StrStream& add_end_object(bool pretty) {
+		if (pretty) {
+			m_buffer.append(' ');
+			m_buffer.end_object();
+			m_buffer.append('\n');
+		}
+		else {
+			m_buffer.end_object();
+		}
+		return *this;
+	}
+	StrStream& add_end_array(bool pretty) {
+		if (pretty) {
+			m_buffer.append(' ');
+			m_buffer.end_array();
+			m_buffer.append('\n');
+		}
+		else {
+			m_buffer.end_array();
+		}
+		return *this;
+	}
+	StrStream& add_colon(bool pretty) {
+		if (pretty) {
+			m_buffer.append(' ');
+			m_buffer.append_colon();
+			m_buffer.append(' ');
+		}
+		else {
+			m_buffer.append_colon();
+		}
+		return *this;
+	}
+	StrStream& add_comma(bool pretty) {
+		if (pretty) {
+			m_buffer.append(' ');
+			m_buffer.append_comma();
+			m_buffer.append(' ');
+		}
+		else {
+			m_buffer.append_comma();
+		}
 		return *this;
 	}
 
 	void add_float(double x) {
-#ifdef __cpp_lib_to_chars
-		char buf[32];
-		auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), x, std::chars_format::fixed);
-		m_buffer.append(buf, ptr);
-#else
-		fmt::format_to(std::back_inserter(m_buffer), FMT_COMPILE("{:f}"), x);
-#endif
+		m_buffer.append(x);
 	}
 
 	StrStream& add_int(int64_t x) {
-		fmt::format_int fi(x);
-		m_buffer.append(fi.data(), fi.data() + fi.size());
+		m_buffer.append(x);
+
+		//fmt::format_int fi(x);
+		//m_buffer.append(fi.data(), fi.data() + fi.size());
 		return *this;
 	}
 
 	StrStream& add_uint(uint64_t x) {
-		fmt::format_int fi(x);
-		m_buffer.append(fi.data(), fi.data() + fi.size());
+		m_buffer.append(x);
+
+		//fmt::format_int fi(x);
+		//m_buffer.append(fi.data(), fi.data() + fi.size());
 		return *this;
 	}
 
-	StrStream& add_3(const char* str, uint64_t len) {
-		m_buffer.append(str, str + len);
+	StrStream& add_bool(bool x) {
+		m_buffer.append(x);
+
+		return *this;
+	}
+
+	StrStream& add_null() {
+		m_buffer.append_null();
+
+		return *this;
+	}
+
+	StrStream& add_str(const char* str, uint64_t len) {
+		m_buffer.append('\"');
+		m_buffer.escape_and_append({ str, len });
+		m_buffer.append('\"');
 		return *this;
 	}
 };
@@ -2099,52 +2177,8 @@ public:
 		 void write_parallel2(const std::string& fileName, const _Value& j, uint64_t thr_num, bool pretty);
 
 	};
-	claujson_inline void _write_string(StrStream& stream, char ch) {
-		switch (ch) {
-		case '\\':
-			stream.add_3("\\\\", 2);
-			break;
-		case '\"':
-			stream.add_3("\\\"", 2);
-			break;
-		case '\n':
-			stream.add_3("\\n", 2);
-			break;
-		case '\b':
-			stream.add_3("\\b", 2);
-			break;
-		case '\f':
-			stream.add_3("\\f", 2);
-			break;
-		case '\r':
-			stream.add_3("\\r", 2);
-			break;
-		case '\t':
-			stream.add_3("\\t", 2);
-			break;
-		default:
-		{
-			int code = ch;
-			if ((code >= 0 && code < 0x20) || code == 0x7F)
-			{
-				char buf[] = "\\uDDDD";
-				snprintf(buf + 2, 5, "%04X", code);
-				stream.add_3(buf, 6);
-			}
-			else {
-				char buf[] = { ch, '\0' };
-				stream.add_3(buf, 1);
-			}
-		}
-		}
-	}
-
 	claujson_inline void write_string(StrStream& stream, const StringView str) {
-		stream.add_char('\"');
-		for (uint64_t i = 0; i < str.size(); ++i) {
-			_write_string(stream, str[i]);
-		}
-		stream.add_char('\"');
+		stream.add_str(str.data(), str.size());
 	}
 
 	static  const StringView str_open_array[] = { "["sv, " [ \n"sv, };
@@ -2163,7 +2197,7 @@ public:
 		else {
 			switch (x.type()) {
 			case _ValueType::BOOL:
-				stream.add_3(x.bool_val() ? "true" : "false", x.bool_val() ? 4 : 5);
+				stream.add_bool(x.bool_val());
 				break;
 			case _ValueType::FLOAT:
 				stream.add_float(x.float_val());
@@ -2175,7 +2209,7 @@ public:
 				stream.add_uint(x.uint_val());
 				break;
 			case _ValueType::NULL_:
-				stream.add_3("null", 4);
+				stream.add_null();
 				break;
 			default:
 				break;
@@ -2189,19 +2223,25 @@ public:
 			bool is_arr = global.is_array();
 
 			if (is_arr) {
-				stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
+				stream.add_start_array(pretty);
+				//stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty? 1 : 0].size());
 			}
 			else {
-				stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
+				stream.add_start_object(pretty);
+
+				//stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 			}
 
 			_write(stream, global, 0, pretty);
 
 			if (is_arr) {
-				stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
+				stream.add_end_array(pretty);
+				//stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 			}
 			else {
-				stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
+				stream.add_end_object(pretty);
+
+				//stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 			}
 
 		}
@@ -2234,7 +2274,7 @@ public:
 						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
 
 						{
-							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
+							stream.add_colon(pretty); // (':'); // add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
 						}
 					}
 					else {
@@ -2244,19 +2284,23 @@ public:
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
+						stream.add_start_object(pretty);
+						//stream.add_3(str_open_object[pretty? 1 : 0].data(), str_open_object[pretty? 1 : 0].size()); // "{";
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
+						stream.add_start_array(pretty);
+						//stream.add_3(str_open_array[pretty? 1 : 0].data(), str_open_array[pretty? 1 : 0].size()); // "[";
 					}
 
 					_write(stream, ut.get_value_list(i), chk_list, depth + 1, pretty);
 
 					if (y.is_object() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-						stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size()); // "}";
+						stream.add_end_object(pretty);
+						//stream.add_3(str_close_object[pretty? 1 : 0].data(), str_close_object[pretty? 1 : 0].size()); // "}";
 					}
 					else if (y.is_array() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-						stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size()); // "]";
+						stream.add_end_array(pretty);
+						//stream.add_3(str_close_array[pretty? 1 : 0].data(), str_close_array[pretty? 1 : 0].size()); // "]";
 					}
 				}
 				else {
@@ -2266,7 +2310,7 @@ public:
 						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
 
 						{
-							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
+							stream.add_colon(pretty); // (':'); // add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
 						}
 					}
 
@@ -2278,7 +2322,7 @@ public:
 				}
 
 				if (i < ut.get_data_size() - 1) {
-					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // ",";
+					stream.add_comma(pretty); // add_char([add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // ",";
 				}
 			}
 		}
@@ -2290,10 +2334,10 @@ public:
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
+						stream.add_start_object(pretty); // add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
+						stream.add_start_array(pretty); // add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
 					}
 
 					_write(stream, ut.get_value_list(i), chk_list, depth + 1, pretty);
@@ -2302,10 +2346,10 @@ public:
 
 
 					if (y.is_object() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-						stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size()); // "}";
+						stream.add_end_object(pretty); // add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size()); // "}";
 					}
 					else if (y.is_array() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-						stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size()); // "]";
+						stream.add_end_array(pretty); // add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size()); // "]";
 					}
 
 				}
@@ -2317,7 +2361,7 @@ public:
 				}
 
 				if (i < ut.get_data_size() - 1) {
-					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // ",";
+					stream.add_comma(pretty); // add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // ",";
 				}
 			}
 		}
@@ -2353,7 +2397,7 @@ public:
 
 
 						{
-							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
+							stream.add_colon(pretty); // add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
 						}
 					}
 					else {
@@ -2363,19 +2407,19 @@ public:
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
+						stream.add_start_object(pretty); // add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
+						stream.add_start_array(pretty); // add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 					}
 
 					_write(stream, ut.get_value_list(i), depth + 1, pretty);
 
 					if (y.is_object()) {
-						stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
+						stream.add_end_object(pretty); // add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 					}
 					else if (y.is_array()) {
-						stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
+						stream.add_end_array(pretty); // (str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 					}
 				}
 				else {
@@ -2391,7 +2435,7 @@ public:
 
 
 						{
-							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
+							stream.add_colon(pretty); // _3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
 						}
 					}
 
@@ -2403,7 +2447,7 @@ public:
 				}
 
 				if (i < ut.get_data_size() - 1) {
-					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+					stream.add_comma(pretty); // 3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 				}
 			}
 		}
@@ -2415,10 +2459,10 @@ public:
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
+						stream.add_start_object(pretty); // add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
+						stream.add_start_array(pretty); // add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 					}
 
 					_write(stream, ut.get_value_list(i), depth + 1, pretty);
@@ -2427,10 +2471,10 @@ public:
 
 
 					if (y.is_object()) {
-						stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
+						stream.add_end_object(pretty); // add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 					}
 					else if (y.is_array()) {
-						stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
+						stream.add_end_array(pretty); // add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 					}
 
 				}
@@ -2441,7 +2485,7 @@ public:
 				}
 
 				if (i < ut.get_data_size() - 1) {
-					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+					stream.add_comma(pretty); // 3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 				}
 			}
 		}
@@ -2463,8 +2507,8 @@ public:
 			return;
 		}
 
-		std_vector<int64_t> _idx_stack; _idx_stack.reserve(1024);
-		std_vector<StructuredPtr> _stack; _stack.reserve(1024);
+		std::vector<int64_t> _idx_stack; _idx_stack.reserve(1024);
+		std::vector<StructuredPtr> _stack; _stack.reserve(1024);
 		_stack.push_back(_ut); _idx_stack.push_back(0);
 
 		while (_stack.empty() == false) {
@@ -2481,15 +2525,15 @@ public:
 				const auto& y = _stack.back().get_value_list(_idx_stack.back() - 1);
 
 				if (y.is_object() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-					stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size()); // "}";
+					stream.add_end_object(pretty); // add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size()); // "}";
 				}
 				else if (y.is_array() && std::find(chk_list.begin(), chk_list.end(), y) == chk_list.end()) {
-					stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size()); // "]";
+					stream.add_end_array(pretty); // add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size()); // "]";
 				}
 
 				const int64_t i = _idx_stack.back() - 1;
 				if (i < _stack.back().get_data_size() - 1) {
-					stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+					stream.add_comma(pretty); // add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 				}
 
 				continue;
@@ -2507,7 +2551,7 @@ public:
 						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
 
 						{
-							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
+							stream.add_colon(pretty); // add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size()); // " : ";
 						}
 					}
 					else {
@@ -2517,10 +2561,10 @@ public:
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
+						stream.add_start_object(pretty); // add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
+						stream.add_start_array(pretty); // add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
 					}
 
 					_stack.push_back(ut.get_value_list(i));
@@ -2535,7 +2579,7 @@ public:
 						write_string(stream, StringView(x.str_val().data(), x.str_val().size()));
 
 						{
-							stream.add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
+							stream.add_colon(pretty); // add_3(str_colon[pretty ? 1 : 0].data(), str_colon[pretty ? 1 : 0].size());
 						}
 					}
 
@@ -2545,7 +2589,7 @@ public:
 						write_primitive(stream, x);
 
 						if (i < ut.get_data_size() - 1) {
-							stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+							stream.add_comma(pretty); // add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 						}
 					}
 				}
@@ -2559,10 +2603,10 @@ public:
 					auto y = (StructuredPtr(ut.get_value_list(i)));
 
 					if (y.is_object() && y.is_virtual() == false) {
-						stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
+						stream.add_start_object(pretty); // add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size()); // "{";
 					}
 					else if (y.is_array() && y.is_virtual() == false) {
-						stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
+						stream.add_start_array(pretty); // add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size()); // "[";
 					}
 
 					_stack.push_back(ut.get_value_list(i));
@@ -2574,7 +2618,7 @@ public:
 					write_primitive(stream, x);
 
 					if (i < ut.get_data_size() - 1) {
-						stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+						stream.add_comma(pretty); // add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 					}
 				}
 			}
@@ -2590,30 +2634,30 @@ public:
 
 		if (global.is_structured()) {
 			if (hint) {
-				stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+				stream.add_comma(pretty); // add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 			}
 			bool is_arr = global.is_array();
 
 			if (is_arr) {
-				stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
+				stream.add_start_array(pretty); // add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 			}
 			else {
-				stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
+				stream.add_start_object(pretty); // add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 			}
 
 			_write(stream, global, 1, pretty);
 
 			if (is_arr) {
-				stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
+				stream.add_end_array(pretty); // (str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 			}
 			else {
-				stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
+				stream.add_end_object(pretty); // add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 			}
 
 		}
 		else {
 			if (hint) {
-				stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+				stream.add_comma(pretty); // add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 			}
 			auto& x = global;
 
@@ -2636,7 +2680,7 @@ public:
 
 	void LoadData2::write_(StrStream& stream, const _Value& global, StructuredPtr temp, bool pretty, bool hint) {
 
-		std_vector<StructuredPtr> chk_list; // point for division?, virtual nodes? }}}?
+		std::vector<StructuredPtr> chk_list; // point for division?, virtual nodes? }}}?
 
 		{
 			while (temp) {
@@ -2647,31 +2691,31 @@ public:
 
 		if (global.is_structured()) {
 			if (hint) {
-				stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // stream << ",";
+				stream.add_comma(pretty); // add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size()); // stream << ",";
 			}
 
 			StructuredPtr j = global;
 
 
 			if (j.is_array() && j.is_virtual() == false) {
-				stream.add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
+				stream.add_start_array(pretty); // add_3(str_open_array[pretty ? 1 : 0].data(), str_open_array[pretty ? 1 : 0].size());
 			}
 			else if (j.is_object() && j.is_virtual() == false) {
-				stream.add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
+				stream.add_start_object(pretty); // add_3(str_open_object[pretty ? 1 : 0].data(), str_open_object[pretty ? 1 : 0].size());
 			}
 
 			_write2(stream, global, chk_list, 1, pretty);
 
 			if (j.is_array() && std::find(chk_list.begin(), chk_list.end(), j) == chk_list.end()) {
-				stream.add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
+				stream.add_end_array(pretty); // add_3(str_close_array[pretty ? 1 : 0].data(), str_close_array[pretty ? 1 : 0].size());
 			}
 			else if (j.is_object() && std::find(chk_list.begin(), chk_list.end(), j) == chk_list.end()) {
-				stream.add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
+				stream.add_end_object(pretty); // add_3(str_close_object[pretty ? 1 : 0].data(), str_close_object[pretty ? 1 : 0].size());
 			}
 		}
 		else {
 			if (hint) {
-				stream.add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
+				stream.add_comma(pretty); // add_3(str_comma[pretty ? 1 : 0].data(), str_comma[pretty ? 1 : 0].size());
 			}
 
 			auto& x = global;
@@ -2988,7 +3032,8 @@ public:
 	}
 
 	void print(JsonView* json_view, JsonView* end, claujson::StrStream& strStream) {
-		
+		const bool pretty = false;
+
 		while (json_view->type != -1) {
 			if (json_view == end) {
 				return;
@@ -2996,17 +3041,17 @@ public:
 
 			switch (json_view->type) {
 			case 0: // ARRAY
-				strStream.add_char('[');
+				strStream.add_start_array(pretty);
 				//strStream.add_char(' ');
 				break;
 			case 1: // OBJECT
-				strStream.add_char('{');
+				strStream.add_start_object(pretty);
 				//strStream.add_char(' ');
 				break;
 			case 2: // KEY
 				write_primitive(strStream, *json_view->value); //strStream.add_1(json_view->value->get_string().data(), json_view->value->get_string().size());
 				//strStream.add_char(' '); 
-				strStream.add_char(':');
+				strStream.add_colon(pretty);
 				//strStream.add_char(' '); 
 				break;
 			case 3: // VALUE
@@ -3014,28 +3059,28 @@ public:
 
 				if ((json_view + 1)->type != 4 && (json_view + 1)->type != 5 && (json_view + 1)->type != -1) {
 
-					strStream.add_char(',');
+					strStream.add_comma(pretty);
 					//strStream.add_char(' ');
 				}
 				break;
 			case 4: // END_ARRAY
-				strStream.add_char(']');
+				strStream.add_end_array(pretty); // dd_char(']');
 				//strStream.add_char('\n');
 
 				if ((json_view + 1)->type != 4 && (json_view + 1)->type != 5 && (json_view +1)->type != -1) {
 
-					strStream.add_char(',');
+					strStream.add_comma(pretty); // (',');
 					//strStream.add_char(' ');
 				}
 
 				break;
 			case 5: // END_OBJECT
-				strStream.add_char('}');
+				strStream.add_end_object(pretty); // add_char('}');
 				//strStream.add_char('\n');
 
 				if ((json_view + 1)->type != 4 && (json_view + 1)->type != 5 && (json_view + 1)->type != -1) {
 
-					strStream.add_char(',');
+					strStream.add_comma(pretty); // add_char(',');
 					//strStream.add_char(' ');
 				}
 				break;
@@ -3046,6 +3091,7 @@ public:
 	}
 
 	void print_pretty(JsonView* json_view, JsonView* end, claujson::StrStream& strStream) {
+		const bool pretty = true;
 
 		while (json_view->type != -1) {
 			if (json_view == end) {
@@ -3054,47 +3100,47 @@ public:
 
 			switch (json_view->type) {
 			case 0: // ARRAY
-				strStream.add_char('[');
-				strStream.add_char(' ');
+				strStream.add_start_array(pretty);
+				//strStream.add_char(' ');
 				break;
 			case 1: // OBJECT
-				strStream.add_char('{');
-				strStream.add_char(' ');
+				strStream.add_start_object(pretty);
+				//strStream.add_char(' ');
 				break;
 			case 2: // KEY
-				write_primitive(strStream, *json_view->value);
-				strStream.add_char(' '); 
-				strStream.add_char(':');
-				strStream.add_char(' '); 
+				write_primitive(strStream, *json_view->value); //strStream.add_1(json_view->value->get_string().data(), json_view->value->get_string().size());
+				//strStream.add_char(' '); 
+				strStream.add_colon(pretty);
+				//strStream.add_char(' '); 
 				break;
 			case 3: // VALUE
 				write_primitive(strStream, *json_view->value);
 
 				if ((json_view + 1)->type != 4 && (json_view + 1)->type != 5 && (json_view + 1)->type != -1) {
 
-					strStream.add_char(',');
-					strStream.add_char(' ');
+					strStream.add_comma(pretty);
+					//strStream.add_char(' ');
 				}
 				break;
 			case 4: // END_ARRAY
-				strStream.add_char(']');
-				strStream.add_char('\n');
+				strStream.add_end_array(pretty); // dd_char(']');
+				//strStream.add_char('\n');
 
 				if ((json_view + 1)->type != 4 && (json_view + 1)->type != 5 && (json_view + 1)->type != -1) {
 
-					strStream.add_char(',');
-					strStream.add_char(' ');
+					strStream.add_comma(pretty); // (',');
+					//strStream.add_char(' ');
 				}
 
 				break;
 			case 5: // END_OBJECT
-				strStream.add_char('}');
-				strStream.add_char('\n');
+				strStream.add_end_object(pretty); // add_char('}');
+				//strStream.add_char('\n');
 
 				if ((json_view + 1)->type != 4 && (json_view + 1)->type != 5 && (json_view + 1)->type != -1) {
 
-					strStream.add_char(',');
-					strStream.add_char(' ');
+					strStream.add_comma(pretty); // add_char(',');
+					//strStream.add_char(' ');
 				}
 				break;
 			}

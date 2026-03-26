@@ -400,7 +400,12 @@ namespace claujson {
 		}
 
 		if (!convert) {
-			_str_val = String(str, Static_Cast<uint64_t, uint32_t>(len));
+			bool e = false;
+			uint32_t x = Static_Cast<uint64_t, uint32_t>(len, e);
+			if (e) {
+				return false;
+			}
+			_str_val = String(str, x);
 			return true;
 		}
 
@@ -517,7 +522,13 @@ namespace claujson {
 	}
 
 	void _Value::set_str_in_parse(const char* str, uint64_t len) {
-		_str_val = String(str, Static_Cast<uint64_t, uint32_t>(len));
+		bool e = false;
+		uint32_t x = Static_Cast<uint64_t, uint32_t>(len, e);
+		if (e) {
+			log << claujson::warn << "set_str_in_parse fail";
+			return;
+		}
+		_str_val = String(str, x);
 	}
 
 	void _Value::set_bool(bool x) {

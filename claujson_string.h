@@ -133,8 +133,14 @@ namespace claujson {
 	private:
 		explicit String(const char* str) {
 			if (!str) { this->type = _ValueType::ERROR; return; }
+			bool e = false;
+			this->sz = Static_Cast<uint64_t, uint32_t>(strlen(str), e);
+			
+			if (e) {
+				this->type = _ValueType::ERROR;
+				return;
+			}
 
-			this->sz = Static_Cast<uint64_t, uint32_t>(strlen(str));
 			if (this->sz < CLAUJSON_STRING_BUF_SIZE) {
 				this->buf_sz = (uint8_t)this->sz;
 				memcpy(this->buf, str, static_cast<uint64_t>(this->buf_sz));
@@ -277,9 +283,17 @@ namespace claujson {
 	private:
 		// suppose str is valid utf-8 string!
 		explicit String(const std::string& str) {
+			bool e = false;
+			uint32_t x = Static_Cast<uint64_t, uint32_t>(str.size(), e);
+
+			if (e) {
+				this->type = _ValueType::ERROR;
+				return;
+			}
+
 			if (str.size() <= CLAUJSON_STRING_BUF_SIZE) {
 				memcpy(buf, str.data(), str.size());
-				this->sz = Static_Cast<uint64_t, uint32_t>(str.size()); // chk..
+				this->sz = x; // chk..
 				this->type = _ValueType::SHORT_STRING;
 			}
 			else {
@@ -291,7 +305,7 @@ namespace claujson {
 				}
 				memcpy(temp, str.data(), str.size());
 				this->str = temp;
-				this->sz = Static_Cast<uint64_t, uint32_t>(str.size());
+				this->sz = x;
 				this->type = _ValueType::STRING;
 			}
 		}

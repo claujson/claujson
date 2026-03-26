@@ -37,6 +37,23 @@
     }
  */
 
+
+/// for c++14!
+template <typename T, typename Enable = void>
+struct safe_unsigned {
+    using type = uint64_t; // fallback (bool, float 등)
+};
+
+template <typename T>
+struct safe_unsigned<T,
+    typename std::enable_if<
+    std::is_integral<T>::value && !std::is_same<T, bool>::value
+>::type >
+{
+    using type = typename std::make_unsigned<T>::type;
+};
+///
+
 /* including _simdjson/common_defs.h: #include "_simdjson/common_defs.h" */
 /* begin file _simdjson/common_defs.h */
 #ifndef _SIMDJSON_COMMON_DEFS_H
@@ -42681,21 +42698,6 @@ static const char decimal_table[200] = {
 };
 } // namespace internal
 
-/// for c++14!
-template <typename T, typename Enable = void>
-struct safe_unsigned {
-    using type = uint64_t; // fallback (bool, float 등)
-};
-
-template <typename T>
-struct safe_unsigned<T,
-    typename std::enable_if<
-    std::is_integral<T>::value && !std::is_same<T, bool>::value
-    >::type >
-{
-    using type = typename std::make_unsigned<T>::type;
-};
-///
 
 
 template <typename number_type, typename>

@@ -507,8 +507,7 @@ namespace claujson {
 		return true;
 	}
 
-
-
+	/*
 	bool _Value::set_str(String str) {
 		if (!is_valid()) {
 			return false;
@@ -520,6 +519,7 @@ namespace claujson {
 		_str_val = std::move(str);
 		return true;
 	}
+	*/
 
 	void _Value::set_str_in_parse(const char* str, uint64_t len) {
 		bool e = false;

@@ -283,7 +283,7 @@ namespace claujson {
 
 		bool set_str(const char* str, uint64_t len);
 
-		bool set_str(String str);
+		//bool set_str(String str);
 	private:
 		void set_str_in_parse(const char* str, uint64_t len);
 	public:

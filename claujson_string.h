@@ -278,7 +278,13 @@ namespace claujson {
 		}
 
 		String substr(uint64_t start, uint64_t len) {
-			return String(data() + start, len);
+			bool e = false;
+			String result = String(data() + start, Static_Cast<uint64_t, uint32_t>(len, e));
+			if (e) {
+				log << warn << "substr in String, len is so long..";
+				return String();
+			}
+			return result;
 		}
 	private:
 		// suppose str is valid utf-8 string!

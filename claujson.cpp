@@ -2745,11 +2745,11 @@ public:
 		}
 
 		//std_vector<claujson::StructuredPtr> temp(thr_num, nullptr); //
-		std_vector<claujson::StructuredPtr> temp_parent(thr_num);
+		std_vector<claujson::StructuredPtr> temp_parent(thr_num, nullptr);
 		
 		auto a = std::chrono::steady_clock::now();
 		
-		std_vector<claujson::StructuredPtr> result(thr_num - 1);
+		std_vector<claujson::StructuredPtr> result(thr_num - 1, nullptr);
 
 		std_vector<int> hint(thr_num - 1, false);
 		bool quit = false;
@@ -2837,8 +2837,8 @@ public:
 							}
 
 							for (uint64_t j = 0; j < result.size(); ++j) {
-								if (result[i]) {
-									result[i].Delete();
+								if (result[j]) {
+									result[j].Delete();
 								}
 							}
 							quit = true;
@@ -2880,8 +2880,8 @@ public:
 						}
 
 						for (uint64_t j = 0; j < result.size(); ++j) {
-							if (result[i]) {
-								result[i].Delete();
+							if (result[j]) {
+								result[j].Delete();
 							}
 						}
 

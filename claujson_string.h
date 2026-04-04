@@ -299,7 +299,7 @@ namespace claujson {
 
 			if (str.size() <= CLAUJSON_STRING_BUF_SIZE) {
 				memcpy(buf, str.data(), str.size());
-				this->sz = x; // chk..
+				this->buf_sz = x; // chk..
 				this->type = _ValueType::SHORT_STRING;
 			}
 			else {

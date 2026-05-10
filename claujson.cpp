@@ -5496,6 +5496,8 @@ public:
 	}
 
 
+	/*
+	
 	bool is_valid_string_in_json(StringView x) {
 		const char* str = x.data();
 		uint64_t len = x.size();
@@ -5686,6 +5688,7 @@ public:
 		return convert_to_string_in_json(StringView(reinterpret_cast<const char*>(x.data()), x.size()));
 	}
 #endif
+*/
 
 }
 

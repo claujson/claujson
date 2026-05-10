@@ -412,7 +412,7 @@ namespace claujson {
 		CLAUJSON_ERROR("PartialJson::MergeWith Error");
 	}
 	void  PartialJson::MergeWith(PartialJson* j, int start_offset) {
-		auto* x = dynamic_cast<PartialJson*>(j);
+		auto* x = (j);
 
 		uint64_t len = j->get_data_size();
 		for (uint64_t i = 0; i < len; ++i) {

@@ -26,14 +26,15 @@ set(SOURCE_DIR ${ROOT})
 
 set(INCLUDE_DIR ${ROOT}) # ${ROOT}/_deps/rapidjson-src/include)
 
-# header..
-target_include_directories(${LIB_NAME}  PUBLIC ${INCLUDE_DIR})
-target_include_directories(${LIB_NAME14} PUBLIC ${INCLUDE_DIR})
+
 
 # build setting.
 add_library(${LIB_NAME} STATIC ${SOURCE_DIR}/claujson.cpp ${SOURCE_DIR}/_simdjson.cpp ${SOURCE_DIR}/claujson_array.cpp ${SOURCE_DIR}/claujson_object.cpp ${SOURCE_DIR}/claujson_partialjson.cpp ${SOURCE_DIR}/claujson_value.cpp) 
 add_library(${LIB_NAME14} STATIC ${SOURCE_DIR}/claujson.cpp ${SOURCE_DIR}/_simdjson.cpp ${SOURCE_DIR}/claujson_array.cpp ${SOURCE_DIR}/claujson_object.cpp ${SOURCE_DIR}/claujson_partialjson.cpp ${SOURCE_DIR}/claujson_value.cpp) 
  
+# header..
+target_include_directories(${LIB_NAME}  PUBLIC ${INCLUDE_DIR})
+target_include_directories(${LIB_NAME14} PUBLIC ${INCLUDE_DIR})
 
 if (UNIX) 
         target_compile_options(${LIB_NAME} PRIVATE -m64 -std=c++2a -march=native -pthread -Wno-narrowing -Wextra -O2)

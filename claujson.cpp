@@ -17,13 +17,7 @@
 
 #else
 
-	StringView operator""sv(const char* str, size_t sz) {
-		return StringView(str, sz);
-	}
-
-	bool operator==(const std::string& str, StringView sv) {
-		return StringView(str.data(), str.size()) == sv;
-	}
+//
 
 #endif
 

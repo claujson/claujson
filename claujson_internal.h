@@ -13,12 +13,13 @@
 
 #include "_simdjson.h" // modified simdjson 
 
-
+/*
 using StringView = std::string_view;
 
 #if __cpp_lib_string_view
 using namespace std::literals::string_view_literals;
 #endif
+*/
 
 namespace claujson {
 
@@ -36,13 +37,13 @@ namespace claujson {
 }
 
 
-/*
+
 #if __cpp_lib_string_view
 #include <string_view>
 using namespace std::literals::string_view_literals;
 namespace claujson {
 	using StringView = std::string_view;
-
+}
 
 #else
 
@@ -145,13 +146,15 @@ namespace claujson {
 	};
 }
 
-StringView operator""sv(const char* str, uint64_t sz);
-bool operator==(const std::string& str, StringView sv);
+inline claujson::StringView operator ""sv(const char* str, size_t sz) {
+	return claujson::StringView(str, sz);
+}
 
-
+inline bool operator==(const std::string& str, claujson::StringView _sv) {
+	return claujson::StringView(str.data(), str.size()) == _sv;
+}
 
 #endif
-*/
 
 
 

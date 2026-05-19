@@ -518,7 +518,7 @@ namespace claujson {
 		FLOAT,
 		BOOL,
 		NULL_,
-		STRING, SHORT_STRING,
+		STRING, SHORT_STRING, STRING_VIEW,
 		NOT_VALID,
 		ERROR // private class?
 	};

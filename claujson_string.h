@@ -48,6 +48,11 @@ namespace claujson {
 				this->buf_sz = other.buf_sz;
 				this->type_ = other.type_;
 			}
+			else if (other.type == _ValueType::STRING_VIEW) {
+				this->sz = other.sz;
+				this->str = other.str;
+				this->type = other.type;
+			}
 
 			return *this;
 		}
@@ -68,6 +73,11 @@ namespace claujson {
 				memcpy(buf, other.buf, CLAUJSON_STRING_BUF_SIZE);
 				this->buf_sz = other.buf_sz;
 				this->type_ = other.type_;
+			}
+			else if (other.type == _ValueType::STRING_VIEW) {
+				this->sz = other.sz;
+				this->str = other.str;
+				this->type = other.type;
 			}
 		}
 		String(String&& other) noexcept {
@@ -115,6 +125,10 @@ namespace claujson {
 			else if (this->type == _ValueType::SHORT_STRING) {
 				obj.buf_sz = this->buf_sz;
 				memcpy(obj.buf, this->buf, CLAUJSON_STRING_BUF_SIZE);
+			}
+			else if (this->type == _ValueType::STRING_VIEW) {
+				obj.sz = this->sz;
+				obj.str = this->str;
 			}
 
 			obj.type = this->type;
@@ -182,17 +196,30 @@ namespace claujson {
 			}
 		}
 
+	private:
+		explicit String(const char* str, uint32_t sz, int) {
+			if (!str) { this->type = _ValueType::ERROR; return; }
+
+			this->sz = sz;
+			
+			{
+				this->str = const_cast<char*>(str);
+				this->type = _ValueType::STRING_VIEW;
+			}
+		}
+
+
 	public:
 		bool is_valid() const {
 			return type != _ValueType::NOT_VALID && type != _ValueType::ERROR;
 		}
 
 		bool is_str() const {
-			return type == _ValueType::STRING || type == _ValueType::SHORT_STRING;
+			return type == _ValueType::STRING || type == _ValueType::SHORT_STRING || type == _ValueType::STRING_VIEW;
 		}
 
 		char* data() {
-			if (type == _ValueType::STRING) {
+			if (type == _ValueType::STRING || type == _ValueType::STRING_VIEW) {
 				return str;
 			}
 			else if (type == _ValueType::SHORT_STRING) {
@@ -204,7 +231,7 @@ namespace claujson {
 		}
 
 		const char* data() const {
-			if (type == _ValueType::STRING) {
+			if (type == _ValueType::STRING || type == _ValueType::STRING_VIEW) {
 				return str;
 			}
 			else if (type == _ValueType::SHORT_STRING) {
@@ -215,7 +242,7 @@ namespace claujson {
 			}
 		}
 		uint64_t size() const {
-			if (type == _ValueType::STRING) {
+			if (type == _ValueType::STRING || type == _ValueType::STRING_VIEW) {
 				return sz;
 			}
 			else if (type == _ValueType::SHORT_STRING) {
@@ -277,7 +304,9 @@ namespace claujson {
 			return npos;
 		}
 
+		// todo - chk STRING_VIEW
 		String substr(uint64_t start, uint64_t len) {
+			std::cout << "chk ";
 			bool e = false;
 			String result = String(data() + start, Static_Cast<uint64_t, uint32_t>(len, e));
 			if (e) {

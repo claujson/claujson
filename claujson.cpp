@@ -28,7 +28,7 @@
 #if __cpp_lib_string_view
 
 #else
-		//const uint64_t StringView::npos = -1;
+		const uint64_t StringView::npos = -1;
 #endif
 
 		Log::Info info;
@@ -500,6 +500,7 @@
 				break;
 			case claujson::_ValueType::STRING:
 			case claujson::_ValueType::SHORT_STRING:
+			case claujson::_ValueType::STRING_VIEW:
 				stream << "\"" << (data._str_val.data()) << "\"";
 				break;
 			case claujson::_ValueType::BOOL:
@@ -695,14 +696,18 @@ namespace claujson {
 	claujson_inline 
 	bool ConvertString(claujson::_Value& data, const char* text, uint64_t len) {
 		uint8_t sbuf[1024 + 1 + _simdjson::_SIMDJSON_PADDING];
-		std::unique_ptr<uint8_t[]> ubuf;
+		thread_local std::unique_ptr<uint8_t[]> ubuf; // todo - chk! thread_local?
+		thread_local uint64_t ubuf_len = 0;
 		uint8_t* string_buf = nullptr;
 
 		if (len <= 1024) {
 			string_buf = sbuf;
 		}
 		else {
-			ubuf = std::make_unique<uint8_t[]>(len + _simdjson::_SIMDJSON_PADDING);
+			if (ubuf_len < len) {
+				ubuf_len = len;
+				ubuf = std::make_unique<uint8_t[]>(len + _simdjson::_SIMDJSON_PADDING);
+			}
 			string_buf = &ubuf[0];
 		}
 		auto* x = _simdjson::parse_string((const uint8_t*)text + 1, string_buf, false);
@@ -710,9 +715,11 @@ namespace claujson {
 			return false; // CLAUJSON_ERROR("Error in Convert for string");
 		}
 		else {
-			*x = '\0';
 			auto string_length = uint32_t(x - string_buf);
-			data.set_str_in_parse(reinterpret_cast<char*>(string_buf), string_length);
+			memcpy(((char*)text), (void*)string_buf, sizeof(char) * string_length);
+			((char*)text)[string_length ] = '\0';
+
+			data.set_str_in_parse(text, string_length);
 		}
 		return true;
 	}
@@ -4416,7 +4423,7 @@ public:
 		pool = pool_init(thr_num);
 	}
 
-	std::pair<bool, uint64_t> parser::parse(const std::string& fileName, Document& d, uint64_t thr_num)
+	std::pair<bool, uint64_t> parser::parse(StringView fileName, Document& d, uint64_t thr_num)
 	{
 		if (thr_num <= 0) {
 			thr_num = std::max((int)std::thread::hardware_concurrency() - 2, 1);
@@ -4438,7 +4445,7 @@ public:
 			log << info << "simdjson-stage1 start\n";
 			// not static??
 
-			auto x = test_.load(fileName);
+			auto x = test_.load(std::string_view(fileName.data(), fileName.size()));
 
 			if (x.error() != _simdjson::error_code::SUCCESS) {
 				log << warn << "stage1 error : ";
@@ -5276,6 +5283,7 @@ public:
 		case _ValueType::UINT:
 		case _ValueType::STRING:
 		case _ValueType::SHORT_STRING:
+		case _ValueType::STRING_VIEW:
 		{
 			Object* obj = new (std::nothrow) Object();
 

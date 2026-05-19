@@ -177,13 +177,14 @@ namespace claujson {
 		}
 
 		uint64_t len = get_data_size();
-		for (uint64_t i = 0; i < len; ++i) {
+		
+		for (uint64_t i = 0; i < len; ++i) {				
 			if (get_key_list(i) == key) {
 				return i;
 			}
 		}
 
-		return -1;
+		return npos;
 	}
 
 	_Value& Object::operator[](uint64_t idx) {

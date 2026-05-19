@@ -653,7 +653,7 @@ namespace claujson {
 		parser(int thr_num = 0);
 	public:
 		// parse json file.
-		std::pair<bool, uint64_t> parse(const std::string& fileName, Document& d, uint64_t thr_num);
+		std::pair<bool, uint64_t> parse(StringView fileName, Document& d, uint64_t thr_num);
 
 		//std::pair<bool, uint64_t> parse2(const std::string& fileName, Document2*& j, uint64_t thr_num);
 		

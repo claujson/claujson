@@ -71,7 +71,7 @@ namespace claujson {
 	public:
 		friend std::ostream& operator<<(std::ostream& stream, const _Value& data);
 
-		friend bool ConvertString(_Value& data, const char* text, uint64_t len);
+		friend bool ConvertString(_Value& data, const char* text, uint64_t len, bool use_heap_string);
 
 		friend class Object;
 		friend class Array;
@@ -285,7 +285,7 @@ namespace claujson {
 
 		//bool set_str(String str);
 	private:
-		void set_str_in_parse(const char* str, uint64_t len);
+		void set_str_in_parse(const char* str, uint64_t len, bool use_heap_string);
 	public:
 		void set_bool(bool x);
 
@@ -610,13 +610,13 @@ namespace claujson {
 	private:
 		// need rename param....!
 		void add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t key_token_idx, uint64_t val_token_idx);
+			char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_heap_string);
 
 		void add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t val_token_idx);
+			char* buf, uint64_t val_token_idx, bool use_heap_string);
 
 		void add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
-			_ValueType type, uint64_t key_token_idx
+			_ValueType type, uint64_t key_token_idx, bool use_heap_string
 		);
 
 		//
@@ -653,16 +653,16 @@ namespace claujson {
 		parser(int thr_num = 0);
 	public:
 		// parse json file.
-		std::pair<bool, uint64_t> parse(StringView fileName, Document& d, uint64_t thr_num);
+		std::pair<bool, uint64_t> parse(StringView fileName, Document& d, uint64_t thr_num, bool use_heap_string = false);
 
 		//std::pair<bool, uint64_t> parse2(const std::string& fileName, Document2*& j, uint64_t thr_num);
 		
 		// parse json str.
-		std::pair<bool, uint64_t> parse_str(StringView str, Document& d, uint64_t thr_num);
+		std::pair<bool, uint64_t> parse_str(StringView str, Document& d, uint64_t thr_num, bool use_heap_string = false);
 
 #if __cpp_lib_char8_t
 		// C++20~
-		std::pair<bool, uint64_t> parse_str(std::u8string_view str, Document& d, uint64_t thr_num);
+		std::pair<bool, uint64_t> parse_str(std::u8string_view str, Document& d, uint64_t thr_num, bool use_heap_string = false);
 #endif
 	};
 
@@ -715,5 +715,5 @@ namespace claujson {
 
 namespace claujson {
 	claujson::_Value& Convert(claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
-			char* buf, uint64_t token_idx, bool& err);
+			char* buf, uint64_t token_idx, bool& err, bool use_heap_string);
 }

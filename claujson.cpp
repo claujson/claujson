@@ -392,45 +392,45 @@
 		// need rename param....!
 
 		void StructuredPtr::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t key_token_idx, uint64_t val_token_idx) {
+			char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_heap_string) {
 			if (type == 1) {
-				return arr->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx);
+				return arr->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_heap_string);
 			}
 			if (type == 2) {
-				return obj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx);
+				return obj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_heap_string);
 			}
 			if (type == 3) {
-				return pj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx);
+				return pj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_heap_string);
 			}
 			//std::cout << "chk 1";
 			return;
 		}
 
 		void StructuredPtr::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t val_token_idx) {
+			char* buf, uint64_t val_token_idx, bool use_heap_string) {
 			if (type == 1) {
-				return arr->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx);
+				return arr->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_heap_string);
 			}
 			if (type == 2) {
-				return obj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx);
+				return obj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_heap_string);
 			}
 			if (type == 3) {
-				return pj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx);
+				return pj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_heap_string);
 			}
 			//std::cout << "chk 2";
 			return;
 		}
 
 		void StructuredPtr::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
-			_ValueType type, uint64_t key_token_idx) {
+			_ValueType type, uint64_t key_token_idx, bool use_heap_string) {
 			if (this->type == 1) {
-				return arr->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx);
+				return arr->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_heap_string);
 			}
 			if (this->type == 2) {
-				return obj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx);
+				return obj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_heap_string);
 			}
 			if (this->type == 3) {
-				return pj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx);
+				return pj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_heap_string);
 			}
 			//std::cout << "chk 3";
 			return;
@@ -694,7 +694,7 @@ namespace claujson {
 	}
 
 	claujson_inline 
-	bool ConvertString(claujson::_Value& data, const char* text, uint64_t len) {
+	bool ConvertString(claujson::_Value& data, const char* text, uint64_t len, bool use_heap_string) {
 		uint8_t sbuf[1024 + 1 + _simdjson::_SIMDJSON_PADDING];
 		thread_local std::unique_ptr<uint8_t[]> ubuf; // todo - chk! thread_local?
 		thread_local uint64_t ubuf_len = 0;
@@ -716,10 +716,15 @@ namespace claujson {
 		}
 		else {
 			auto string_length = uint32_t(x - string_buf);
-			memcpy(((char*)text), (void*)string_buf, sizeof(char) * string_length);
-			((char*)text)[string_length ] = '\0';
-
-			data.set_str_in_parse(text, string_length);
+			if (!use_heap_string) {
+				memcpy(((char*)text), (void*)string_buf, sizeof(char) * string_length);
+				((char*)text)[string_length] = '\0';
+				data.set_str_in_parse(text, string_length, false);
+			}
+			else {
+				*x = '\0';
+				data.set_str_in_parse((char*)string_buf, string_length, true);
+			}
 		}
 		return true;
 	}
@@ -780,7 +785,7 @@ namespace claujson {
 	}
 
 	claujson::_Value& Convert(claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
-		char* buf, uint64_t token_idx, bool& err) {
+		char* buf, uint64_t token_idx, bool& err, bool use_heap_string) {
 		
 		data.clear(true);
 
@@ -789,7 +794,7 @@ namespace claujson {
 		
 		switch (ch) {
 		case '"':
-			if (ConvertString(data, &buf[buf_idx], next_buf_idx - buf_idx)) {}
+			if (ConvertString(data, &buf[buf_idx], next_buf_idx - buf_idx, use_heap_string)) {}
 			else {
 				goto ERR;
 			}
@@ -1675,7 +1680,8 @@ public:
 			int start_state, int last_state, // this line : now not used..
 			class StructuredPtr* next, uint64_t* count_vec, 
 
-			 int* err, uint64_t no)
+			 int* err, uint64_t no,
+			 bool use_heap_string)
 		{
 			try {
 				if (token_arr_len <= 0) {
@@ -1729,11 +1735,11 @@ public:
 							else {
 
 								if (key.is_key) {
-									nowUT.add_item_type(key.buf_idx, key.next_buf_idx, data.buf_idx, data.next_buf_idx, buf, key.token_idx, data.token_idx);
+									nowUT.add_item_type(key.buf_idx, key.next_buf_idx, data.buf_idx, data.next_buf_idx, buf, key.token_idx, data.token_idx, use_heap_string);
 									key.is_key = false;
 								}
 								else {
-									nowUT.add_item_type(data.buf_idx, data.next_buf_idx, buf, data.token_idx);
+									nowUT.add_item_type(data.buf_idx, data.next_buf_idx, buf, data.token_idx, use_heap_string);
 								}
 							}
 						}
@@ -1746,7 +1752,7 @@ public:
 
 						if (key.is_key) {
 							nowUT.add_user_type(key.buf_idx, key.next_buf_idx, buf,
-								type == '{' ? _ValueType::OBJECT : _ValueType::ARRAY, key.token_idx
+								type == '{' ? _ValueType::OBJECT : _ValueType::ARRAY, key.token_idx, use_heap_string
 							); // object vs array
 							key.is_key = false;
 						}
@@ -1873,7 +1879,8 @@ public:
 			_simdjson::internal::dom_parser_implementation* imple, int64_t& length,
 			std_vector<int64_t>& start, uint64_t* count_vec,
 
-			 uint64_t parse_num) // first, strVec.empty() must be true!!
+			 uint64_t parse_num,
+			 bool use_heap_string) // first, strVec.empty() must be true!!
 		{	
 			StructuredPtr _global = (new PartialJson());
 			std_vector<StructuredPtr> __global;
@@ -1934,7 +1941,7 @@ public:
 							result[0] = pool->enqueue(__LoadData, (buf), buf_len, (imple), start[0], _token_arr_len, (__global[0]), 0, 0,
 								&next[0], count_vec,
 
-								&err[0], 0);
+								&err[0], 0, use_heap_string);
 						}
 
 						auto a = std::chrono::steady_clock::now();
@@ -1945,7 +1952,7 @@ public:
 							result[i] = pool->enqueue(__LoadData, (buf), buf_len, (imple), pivots[i], _token_arr_len, (__global[i]), 0, 0,
 								&next[i], count_vec,
 
-								& err[i], i);
+								& err[i], i, use_heap_string);
 
 						}
 
@@ -2149,11 +2156,13 @@ public:
 			_simdjson::internal::dom_parser_implementation* imple,
 			int64_t length, std_vector<int64_t>& start, uint64_t* count_vec, 
 
-			 uint64_t thr_num) {
+			 uint64_t thr_num,
+			 
+			 bool use_heap_string) {
 
 			return _LoadData(global, buf, buf_len, imple, length, start, count_vec, 
 
-				thr_num);
+				thr_num, use_heap_string);
 		}
 
 	private:
@@ -4423,7 +4432,7 @@ public:
 		pool = pool_init(thr_num);
 	}
 
-	std::pair<bool, uint64_t> parser::parse(StringView fileName, Document& d, uint64_t thr_num)
+	std::pair<bool, uint64_t> parser::parse(StringView fileName, Document& d, uint64_t thr_num, bool use_heap_string)
 	{
 		if (thr_num <= 0) {
 			thr_num = std::max((int)std::thread::hardware_concurrency() - 2, 1);
@@ -4634,7 +4643,7 @@ public:
 			LoadData2 p(pool.get());
 						
 			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec, 
-				thr_num)) // 0 : use all thread..
+				thr_num, use_heap_string)) // 0 : use all thread..
 			{
 				free(count_vec);
 				return { false, 0 };
@@ -4748,7 +4757,7 @@ public:
 	}
 	*/
 	
-	std::pair<bool, uint64_t> parser::parse_str(StringView str, Document& d, uint64_t thr_num)
+	std::pair<bool, uint64_t> parser::parse_str(StringView str, Document& d, uint64_t thr_num, bool use_heap_string)
 	{
 		claujson::clean(d.Get());
 		_Value& ut = d.Get();
@@ -4942,7 +4951,7 @@ public:
 			LoadData2 p(pool.get());
 
 			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec, 
-				thr_num)) // 0 : use all thread..
+				thr_num, use_heap_string)) // 0 : use all thread..
 			{
 				free(count_vec);
 				return { false, 0 };
@@ -4961,8 +4970,8 @@ public:
 
 #if __cpp_lib_char8_t
 	// C++20~
-	std::pair<bool, uint64_t> parser::parse_str(std::u8string_view str, Document& d, uint64_t thr_num) {
-		return parse_str(StringView(reinterpret_cast<const char*>(str.data()), str.size()), d, thr_num);
+	std::pair<bool, uint64_t> parser::parse_str(std::u8string_view str, Document& d, uint64_t thr_num, bool use_heap_string) {
+		return parse_str(StringView(reinterpret_cast<const char*>(str.data()), str.size()), d, thr_num, use_heap_string);
 	}
 #endif
 

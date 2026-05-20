@@ -389,7 +389,7 @@ namespace claujson {
 	}
 
 	void Object::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
-		char* buf, uint64_t key_token_idx, uint64_t val_token_idx) {
+		char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_heap_string) {
 
 			{
 				_Value temp;// key
@@ -397,12 +397,12 @@ namespace claujson {
 
 				bool e = false;
 
-				claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e);
+				claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, use_heap_string);
 
 				if (e) {
 					CLAUJSON_ERROR("Error in add_item_type");
 				}
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e);
+				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, use_heap_string);
 				if (e) {
 					CLAUJSON_ERROR("Error in add_item_type");
 				}
@@ -416,7 +416,7 @@ namespace claujson {
 	}
 
 	void Object::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
-		char* buf, uint64_t val_token_idx) {
+		char* buf, uint64_t val_token_idx, bool use_heap_string) {
 		// error
 
 		log << warn << "errr..";
@@ -434,7 +434,7 @@ namespace claujson {
 	}
 
 	void Object::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
-		_ValueType type, uint64_t key_token_idx
+		_ValueType type, uint64_t key_token_idx, bool use_heap_string
 
 	) {
 
@@ -442,7 +442,7 @@ namespace claujson {
 			_Value temp;
 			bool e = false;
 
-			claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e);
+			claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, use_heap_string);
 			if (e) {
 				CLAUJSON_ERROR("Error in add_user_type");
 			}

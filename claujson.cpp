@@ -5055,7 +5055,7 @@ public:
 		static const _Value _add_str = _Value("add"sv);
 	
 
-		if (x.type() != y.type()) {
+		if (x.type() != y.type() && (false == x.is_string() || false == y.is_string())) {
 			Object* obj = new (std::nothrow) Object();
 			
 			if (obj == nullptr) {

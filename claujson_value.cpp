@@ -603,7 +603,7 @@ namespace claujson {
 	_Value::_Value() : _int_val(0), _type(_ValueType::NONE) {}
 
 	bool _Value::operator==(const _Value& other) const { // chk array or object?
-		if (this->is_str() == other.is_str()) {
+		if (this->is_str() && other.is_str()) {
 			return this->_str_val == other._str_val;
 		}
 
@@ -639,6 +639,9 @@ namespace claujson {
 							return false;
 						}
 					}
+				}
+				else {
+					return false;
 				}
 			}
 			break;
@@ -680,7 +683,7 @@ namespace claujson {
 	}
 
 	bool _Value::operator<(const _Value& other) const {
-		if (this->is_str() == other.is_str()) {
+		if (this->is_str() && other.is_str()) {
 			return this->_str_val < other._str_val;
 		}
 

@@ -53,8 +53,8 @@ namespace claujson {
 		explicit StringView() : m_str(nullptr), m_len(0) {}
 
 		StringView(const std::string& str) : m_str(str.data()), m_len(str.size()) {}
-		explicit StringView(const char* str) : m_str(str) { m_len = strlen(str); }
-		explicit StringView(const char* str, uint64_t len) : m_str(str), m_len(len) {}
+		StringView(const char* str) : m_str(str) { m_len = strlen(str); }
+		StringView(const char* str, uint64_t len) : m_str(str), m_len(len) {}
 		StringView(const StringView& other) {
 			m_str = other.m_str;
 			m_len = other.m_len;

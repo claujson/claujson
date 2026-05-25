@@ -65,7 +65,7 @@ namespace claujson {
 
 		if (obj == nullptr) {
 			_Value v;
-			v._type = _ValueType::ERROR;
+			v._type = _ValueType::_VALUE_TYPE_ERROR;
 			return v;
 		}
 
@@ -76,7 +76,7 @@ namespace claujson {
 
 		if (obj == nullptr) {
 			_Value v;
-			v._type = _ValueType::ERROR;
+			v._type = _ValueType::_VALUE_TYPE_ERROR;
 			return v;
 		}
 		obj->parent = Pointer(nullptr, 1, 0);

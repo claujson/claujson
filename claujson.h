@@ -653,16 +653,16 @@ namespace claujson {
 		parser(int thr_num = 0);
 	public:
 		// parse json file.
-		std::pair<bool, uint64_t> parse(StringView fileName, Document& d, uint64_t thr_num, bool use_heap_string = false);
+		std::pair<bool, uint64_t> parse(StringView fileName, Document& d, uint64_t thr_num, bool use_heap_string = true);
 
 		//std::pair<bool, uint64_t> parse2(const std::string& fileName, Document2*& j, uint64_t thr_num);
 		
 		// parse json str.
-		std::pair<bool, uint64_t> parse_str(StringView str, Document& d, uint64_t thr_num, bool use_heap_string = false);
+		std::pair<bool, uint64_t> parse_str(StringView str, Document& d, uint64_t thr_num, bool use_heap_string = true);
 
 #if __cpp_lib_char8_t
 		// C++20~
-		std::pair<bool, uint64_t> parse_str(std::u8string_view str, Document& d, uint64_t thr_num, bool use_heap_string = false);
+		std::pair<bool, uint64_t> parse_str(std::u8string_view str, Document& d, uint64_t thr_num, bool use_heap_string = true);
 #endif
 	};
 

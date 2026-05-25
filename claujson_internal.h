@@ -520,7 +520,7 @@ namespace claujson {
 		NULL_,
 		STRING, SHORT_STRING, STRING_VIEW,
 		NOT_VALID,
-		ERROR // private class?
+		_VALUE_TYPE_ERROR // private class?
 	};
 
 	template <class Key, class Data>

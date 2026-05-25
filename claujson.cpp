@@ -1,4 +1,6 @@
 ﻿
+#include "mimalloc-new-delete.h"
+
 #include "claujson.h"
 
 #include <future>
@@ -695,7 +697,7 @@ namespace claujson {
 
 	claujson_inline 
 	bool ConvertString(claujson::_Value& data, const char* text, uint64_t len, bool use_heap_string) {
-		uint8_t sbuf[1024 + 1 + _simdjson::_SIMDJSON_PADDING];
+		uint8_t sbuf[1024 + _simdjson::_SIMDJSON_PADDING];
 		thread_local std::unique_ptr<uint8_t[]> ubuf; // todo - chk! thread_local?
 		thread_local uint64_t ubuf_len = 0;
 		uint8_t* string_buf = nullptr;

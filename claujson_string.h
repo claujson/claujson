@@ -34,7 +34,7 @@ namespace claujson {
 			if (other.type == _ValueType::STRING) {
 				this->str = new (std::nothrow) char[other.sz + 1];
 				if (this->str == nullptr) {
-					this->type = _ValueType::ERROR;
+					this->type = _ValueType::_VALUE_TYPE_ERROR;
 					log << warn << "new error";
 					return *this;
 				}
@@ -62,7 +62,7 @@ namespace claujson {
 				this->str = new (std::nothrow) char[other.sz + 1];
 				if (this->str == nullptr) {
 					log << warn << "new error";
-					this->type = _ValueType::ERROR; return;
+					this->type = _ValueType::_VALUE_TYPE_ERROR; return;
 				}
 				this->sz = other.sz;
 				memcpy(this->str, other.str, other.sz);
@@ -114,9 +114,9 @@ namespace claujson {
 				obj.str = new (std::nothrow) char[this->sz + 1];
 				if (obj.str == nullptr) {
 					log << warn << "new error";
-					obj.type = _ValueType::ERROR;
+					obj.type = _ValueType::_VALUE_TYPE_ERROR;
 					String result;
-					result.type = _ValueType::ERROR;
+					result.type = _ValueType::_VALUE_TYPE_ERROR;
 					return result;
 				}
 				memcpy(obj.str, this->str, this->sz);
@@ -146,12 +146,12 @@ namespace claujson {
 
 	private:
 		explicit String(const char* str) {
-			if (!str) { this->type = _ValueType::ERROR; return; }
+			if (!str) { this->type = _ValueType::_VALUE_TYPE_ERROR; return; }
 			bool e = false;
 			this->sz = Static_Cast<uint64_t, uint32_t>(strlen(str), e);
 			
 			if (e) {
-				this->type = _ValueType::ERROR;
+				this->type = _ValueType::_VALUE_TYPE_ERROR;
 				return;
 			}
 
@@ -165,7 +165,7 @@ namespace claujson {
 				this->str = new (std::nothrow) char[this->sz + 1];
 				if (this->str == nullptr) {
 					log << warn << "new error";
-					this->type = _ValueType::ERROR; return;
+					this->type = _ValueType::_VALUE_TYPE_ERROR; return;
 				}
 				memcpy(this->str, str, this->sz);
 				this->str[this->sz] = '\0';
@@ -174,7 +174,7 @@ namespace claujson {
 		}
 
 		explicit String(const char* str, uint32_t sz) {
-			if (!str) { this->type = _ValueType::ERROR; return; }
+			if (!str) { this->type = _ValueType::_VALUE_TYPE_ERROR; return; }
 
 			this->sz = sz;
 			if (this->sz < CLAUJSON_STRING_BUF_SIZE) {
@@ -186,7 +186,7 @@ namespace claujson {
 			else {
 				this->str = new (std::nothrow) char[this->sz + 1];
 				if (this->str == nullptr) {
-					this->type = _ValueType::ERROR;
+					this->type = _ValueType::_VALUE_TYPE_ERROR;
 					log << warn << "new error";
 					return;
 				}
@@ -198,7 +198,7 @@ namespace claujson {
 
 	private:
 		explicit String(const char* str, uint32_t sz, int) {
-			if (!str) { this->type = _ValueType::ERROR; return; }
+			if (!str) { this->type = _ValueType::_VALUE_TYPE_ERROR; return; }
 
 			this->sz = sz;
 			
@@ -211,7 +211,7 @@ namespace claujson {
 
 	public:
 		bool is_valid() const {
-			return type != _ValueType::NOT_VALID && type != _ValueType::ERROR;
+			return type != _ValueType::NOT_VALID && type != _ValueType::_VALUE_TYPE_ERROR;
 		}
 
 		bool is_str() const {
@@ -330,7 +330,7 @@ namespace claujson {
 			uint32_t x = Static_Cast<uint64_t, uint32_t>(str.size(), e);
 
 			if (e) {
-				this->type = _ValueType::ERROR;
+				this->type = _ValueType::_VALUE_TYPE_ERROR;
 				return;
 			}
 

@@ -532,7 +532,7 @@ namespace claujson {
 		Pair() {}
 		Pair(Key&& first, Data&& second) : first(std::move(first)), second(std::move(second)) {}
 		Pair(const Key& first, Data&& second) : first((first)), second(std::move(second)) {}
-		Pair(Key&& first, const Data& second) : first(std::move(first)), second((second)) {}
+		Pair(Key&& first, const Data& second) : first(std::move(first)), second(second) {}
 	};
 
 	template <class T>

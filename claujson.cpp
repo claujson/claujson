@@ -801,10 +801,10 @@ namespace claujson {
 				goto ERR;
 			}
 			break;
-		case '-':
+	
 		case '0':
 		case '1': case '2': case '3': case '4':
-		case '5': case '6': case '7': case '8': case '9':
+		case '5': case '6': case '7': case '8': case '9':	case '-':
 		{
 			if (ConvertNumber(data, &buf[buf_idx], next_buf_idx - buf_idx, token_idx == 0)) {}
 			else {
@@ -1707,9 +1707,11 @@ public:
 				for (auto* p = &imple->structural_indexes[token_arr_start]; p != p_end; ++p) {
 					const char type = (buf[*p]);
 
-					switch (type) {
-					case ',':
+					if (type == ',') {
 						continue;
+					}
+
+					switch (type) {
 					default:
 					{
 						bool is_key = p + 1 < p_end && buf[*(p + 1)] == ':';

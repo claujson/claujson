@@ -394,45 +394,45 @@
 		// need rename param....!
 
 		void StructuredPtr::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_heap_string) {
+			char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_lex_string) {
 			if (type == 1) {
-				return arr->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_heap_string);
+				return arr->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
 			}
 			if (type == 2) {
-				return obj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_heap_string);
+				return obj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
 			}
 			if (type == 3) {
-				return pj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_heap_string);
+				return pj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
 			}
 			//std::cout << "chk 1";
 			return;
 		}
 
 		void StructuredPtr::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t val_token_idx, bool use_heap_string) {
+			char* buf, uint64_t val_token_idx, bool use_lex_string) {
 			if (type == 1) {
-				return arr->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_heap_string);
+				return arr->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
 			}
 			if (type == 2) {
-				return obj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_heap_string);
+				return obj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
 			}
 			if (type == 3) {
-				return pj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_heap_string);
+				return pj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
 			}
 			//std::cout << "chk 2";
 			return;
 		}
 
 		void StructuredPtr::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
-			_ValueType type, uint64_t key_token_idx, bool use_heap_string) {
+			_ValueType type, uint64_t key_token_idx, bool use_lex_string) {
 			if (this->type == 1) {
-				return arr->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_heap_string);
+				return arr->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
 			}
 			if (this->type == 2) {
-				return obj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_heap_string);
+				return obj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
 			}
 			if (this->type == 3) {
-				return pj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_heap_string);
+				return pj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
 			}
 			//std::cout << "chk 3";
 			return;
@@ -696,7 +696,7 @@ namespace claujson {
 	}
 
 	claujson_inline 
-	bool ConvertString(claujson::_Value& data, const char* text, uint64_t len, bool use_heap_string) {
+	bool ConvertString(claujson::_Value& data, const char* text, uint64_t len, bool use_lex_string) {
 		uint8_t sbuf[1024 + _simdjson::_SIMDJSON_PADDING];
 		thread_local std::unique_ptr<uint8_t[]> ubuf; // todo - chk! thread_local?
 		thread_local uint64_t ubuf_len = 0;
@@ -718,7 +718,7 @@ namespace claujson {
 		}
 		else {
 			auto string_length = uint32_t(x - string_buf);
-			if (!use_heap_string) {
+			if (!use_lex_string) {
 				memcpy(((char*)text), (void*)string_buf, sizeof(char) * string_length);
 				((char*)text)[string_length] = '\0';
 				data.set_str_in_parse(text, string_length, false);
@@ -787,7 +787,7 @@ namespace claujson {
 	}
 
 	claujson::_Value& Convert(claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
-		char* buf, uint64_t token_idx, bool& err, bool use_heap_string) {
+		char* buf, uint64_t token_idx, bool& err, bool use_lex_string) {
 		
 		data.clear(true);
 
@@ -796,7 +796,7 @@ namespace claujson {
 		
 		switch (ch) {
 		case '"':
-			if (ConvertString(data, &buf[buf_idx], next_buf_idx - buf_idx, use_heap_string)) {}
+			if (ConvertString(data, &buf[buf_idx], next_buf_idx - buf_idx, use_lex_string)) {}
 			else {
 				goto ERR;
 			}
@@ -1683,7 +1683,7 @@ public:
 			class StructuredPtr* next, uint64_t* count_vec, 
 
 			 int* err, uint64_t no,
-			 bool use_heap_string)
+			 bool use_lex_string)
 		{
 			try {
 				if (token_arr_len <= 0) {
@@ -1739,11 +1739,11 @@ public:
 							else {
 
 								if (key.is_key) {
-									nowUT.add_item_type(key.buf_idx, key.next_buf_idx, data.buf_idx, data.next_buf_idx, buf, key.token_idx, data.token_idx, use_heap_string);
+									nowUT.add_item_type(key.buf_idx, key.next_buf_idx, data.buf_idx, data.next_buf_idx, buf, key.token_idx, data.token_idx, use_lex_string);
 									key.is_key = false;
 								}
 								else {
-									nowUT.add_item_type(data.buf_idx, data.next_buf_idx, buf, data.token_idx, use_heap_string);
+									nowUT.add_item_type(data.buf_idx, data.next_buf_idx, buf, data.token_idx, use_lex_string);
 								}
 							}
 						}
@@ -1756,7 +1756,7 @@ public:
 
 						if (key.is_key) {
 							nowUT.add_user_type(key.buf_idx, key.next_buf_idx, buf,
-								type == '{' ? _ValueType::OBJECT : _ValueType::ARRAY, key.token_idx, use_heap_string
+								type == '{' ? _ValueType::OBJECT : _ValueType::ARRAY, key.token_idx, use_lex_string
 							); // object vs array
 							key.is_key = false;
 						}
@@ -1884,7 +1884,7 @@ public:
 			std_vector<int64_t>& start, uint64_t* count_vec,
 
 			 uint64_t parse_num,
-			 bool use_heap_string) // first, strVec.empty() must be true!!
+			 bool use_lex_string) // first, strVec.empty() must be true!!
 		{	
 			StructuredPtr _global = (new PartialJson());
 			std_vector<StructuredPtr> __global;
@@ -1945,7 +1945,7 @@ public:
 							result[0] = pool->enqueue(__LoadData, (buf), buf_len, (imple), start[0], _token_arr_len, (__global[0]), 0, 0,
 								&next[0], count_vec,
 
-								&err[0], 0, use_heap_string);
+								&err[0], 0, use_lex_string);
 						}
 
 						auto a = std::chrono::steady_clock::now();
@@ -1956,7 +1956,7 @@ public:
 							result[i] = pool->enqueue(__LoadData, (buf), buf_len, (imple), pivots[i], _token_arr_len, (__global[i]), 0, 0,
 								&next[i], count_vec,
 
-								& err[i], i, use_heap_string);
+								& err[i], i, use_lex_string);
 
 						}
 
@@ -2162,11 +2162,11 @@ public:
 
 			 uint64_t thr_num,
 			 
-			 bool use_heap_string) {
+			 bool use_lex_string) {
 
 			return _LoadData(global, buf, buf_len, imple, length, start, count_vec, 
 
-				thr_num, use_heap_string);
+				thr_num, use_lex_string);
 		}
 
 	private:
@@ -3322,18 +3322,20 @@ public:
 	bool is_valid2(_simdjson::dom::parser_for_claujson& dom_parser, uint64_t start, uint64_t last,
 		int* _start_state, int* _last_state,
 		Vector<int8_t>* _is_array, Vector<int8_t>* _is_virtual_array,
-		uint64_t* count = nullptr
-		) {
+		uint64_t* count = nullptr, int64_t* _count_open_ = nullptr, int64_t* _count_ = nullptr
+	) {
 
 		const auto& buf = dom_parser.raw_buf();
 
 		auto* simdjson_imple = dom_parser.raw_implementation().get();
 		uint64_t idx = start;
 		uint64_t depth = 0;
-
+		
 		Vector<int8_t> is_array;
 		Vector<int8_t> is_virtual_array;
 		Vector<uint64_t> _stack;
+		int64_t count_open_ = 0;
+		int64_t count_ = 0;
 
 		int state = 0;
 		uint64_t no = start;
@@ -3389,13 +3391,17 @@ public:
 			//	}
 
 			switch (value) { // start == 0
-			case '{': { if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
-				++idx; log << warn << ("empty object"); count[no++] = 0;
+			case '{': { 
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
+					++idx; --count_;  log << warn << ("empty object"); count[no++] = 0;
 				break;
 			} *_start_state = 0;  goto object_begin;
 			}
-			case '[': { if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
-				++idx; log << warn << ("empty array"); count[no++] = 0; 
+			case '[': {
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
+					++idx; --count_;  log << warn << ("empty array"); count[no++] = 0;
 				break;
 			} *_start_state = 4;  goto array_begin;
 			}
@@ -3488,13 +3494,17 @@ public:
 		{
 			auto value = buf[simdjson_imple->structural_indexes[idx++]];
 			switch (value) {
-			case '{': if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
-				++idx;count[no++] = 0;
+			case '{':
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
+					++idx; --count_; count[no++] = 0;
 				break;
 			}
 					goto object_begin;
-			case '[': if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
-				++idx;count[no++] = 0; 
+			case '[':
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
+					++idx; --count_;  count[no++] = 0;
 				break;
 			} 
 					goto array_begin;
@@ -3571,6 +3581,8 @@ public:
 
 	scope_end:
 		{
+			--count_; // depth?
+			
 			state = 3;
 			if (depth > 0) {
 				depth--; is_array.pop_back(); _stack.pop_back(); // if (_stack.empty()) { virtual_count = 0; }
@@ -3668,9 +3680,15 @@ public:
 		{
 			auto value = buf[simdjson_imple->structural_indexes[idx++]];
 			switch (value) {
-			case '{': if (buf[simdjson_imple->structural_indexes[idx]] == '}') { ++idx; count[no++] = 0; 
+			case '{':
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
+					++idx; --count_; count[no++] = 0;
 				break; } goto object_begin;
-			case '[': if (buf[simdjson_imple->structural_indexes[idx]] == ']') { ++idx; count[no++] = 0;
+			case '[':
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
+					++idx; --count_; count[no++] = 0;
 				break; } goto array_begin;
 			case ',': { log << warn << "wrong comma.";
 				//if (err) {
@@ -3752,6 +3770,14 @@ public:
 
 		if (_is_virtual_array) {
 			*_is_virtual_array = std::move(is_virtual_array);
+		}
+
+		if (_count_open_) {
+			*_count_open_ = count_open_;
+		}
+
+		if (_count_) {
+			*_count_ = count_;
 		}
 
 		return true;
@@ -4436,7 +4462,292 @@ public:
 		pool = pool_init(thr_num);
 	}
 
-	std::pair<bool, uint64_t> parser::parse(StringView fileName, Document& d, uint64_t thr_num, bool use_heap_string)
+	std::pair<bool, uint64_t> parser::parse_small(StringView str, Document& d, bool use_lex_string) {
+		_Value& ut = d.Get();
+
+		auto _ = std::chrono::steady_clock::now();
+
+		{
+			log << info << "simdjson-stage1 start\n";
+			auto x = test_.parse(str.data(), str.size());
+			if (x.error() != _simdjson::error_code::SUCCESS) {
+				log << warn << "stage1 error : " << x.error() << "\n";
+				return { false, 0 };
+			}
+			auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - _);
+			log << info << dur.count() << "ms\n";
+
+			_ = std::chrono::steady_clock::now();
+
+			const auto& buf = test_.raw_buf().get();
+			const auto buf_len = test_.raw_len();
+			auto* simdjson_imple = test_.raw_implementation().get();
+
+			//d.pool->Reset();
+			ut = _Value();
+
+			dur = std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - _);
+			log << info << dur.count() << "ms\n";
+
+			if (simdjson_imple->n_structural_indexes == 0) {
+				return { false, 0 };
+			}
+
+			int64_t count_open_ = 0;
+			int64_t count_ = 0;
+
+			uint64_t idx = 0;
+			uint64_t depth = 0;
+
+			std_vector<_Value*> _stack;  // [depth-1] : 현재 컨테이너 포인터
+			_stack.reserve(1024);
+
+			_Value _key;
+
+			// ── 첫 번째 값 ────────────────────────────────────────────────────────
+			{
+				auto& value = buf[simdjson_imple->structural_indexes[idx++]];
+
+				switch (value) {
+				case '{':
+					if (buf[simdjson_imple->structural_indexes[
+						simdjson_imple->n_structural_indexes - 1]] != '}') {
+						log << warn << "starting brace unmatched";
+						return { false, 1 };
+					}
+					break;
+				case '[':
+					if (buf[simdjson_imple->structural_indexes[
+						simdjson_imple->n_structural_indexes - 1]] != ']') {
+						log << warn << "starting bracket unmatched";
+						return { false, 2 };
+					}
+					break;
+				}
+
+				switch (value) {
+				case '{':
+					count_open_ = std::max(count_open_, ++count_);
+					ut = Object::Make();
+					if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
+						++idx; --count_;  break;
+					}
+					_stack.push_back(&ut);
+					goto object_begin;
+
+				case '[':
+					count_open_ = std::max(count_open_, ++count_);
+					ut = Array::Make();
+					if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
+						++idx; --count_; break;
+					}
+					_stack.push_back(&ut);
+					goto array_begin;
+
+				case ':': case ',': case '}': case ']':
+					log << warn << "not primitive";
+					return { false, 3 };
+
+				default:
+				{
+					bool e = false;
+					Convert(ut, &value - buf, buf_len, false, buf, 0, e, use_lex_string);
+					if (e) { log << warn << "convert error"; return { false, 3 }; }
+				}
+				break;
+				}
+			}
+			goto document_end;
+
+			// ── Object ────────────────────────────────────────────────────────────
+		object_begin:
+			depth++;
+			{
+				auto& key = buf[simdjson_imple->structural_indexes[idx++]];
+				if (key != '"') {
+					log << warn << "Object does not start with a key";
+					return { false, 4 };
+				}
+				bool e = false;
+				Convert(_key, &key - buf, buf_len, true, buf, 1, e, use_lex_string);
+				if (e) { log << warn << "convert error"; return { false, 5 }; }
+			}
+
+		object_field:
+			if (_simdjson_unlikely(
+				buf[simdjson_imple->structural_indexes[idx++]] != ':')) {
+				log << warn << "Missing colon after key in object";
+				return { false, 6 };
+			}
+			{
+				auto& value = buf[simdjson_imple->structural_indexes[idx++]];
+				switch (value) {
+
+				case '{':
+					count_open_ = std::max(count_open_, ++count_);
+					_stack[depth - 1]->as_object()->add_element(
+						std::move(_key), Object::Make());
+					if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
+						++idx; --count_; break;
+					}
+					{
+						auto* parent = _stack[depth - 1]->as_object();
+						auto* child = &parent->get_value_list(parent->size() - 1);
+						if ((uint64_t)_stack.size() < depth + 1) _stack.push_back(child);
+						else                                      _stack[depth] = child;
+						goto object_begin;
+					}
+
+				case '[':
+					count_open_ = std::max(count_open_, ++count_);
+					_stack[depth - 1]->as_object()->add_element(
+						std::move(_key), Array::Make());
+					if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
+						++idx; --count_; break;
+					}
+					{
+						auto* parent = _stack[depth - 1]->as_object();
+						auto* child = &parent->get_value_list(parent->size() - 1);
+						if ((uint64_t)_stack.size() < depth + 1) _stack.push_back(child);
+						else                                      _stack[depth] = child;
+						goto array_begin;
+					}
+
+				case ',': { log << warn << "wrong comma."; return { false, 7 }; }
+				case ':': { log << warn << "wrong colon."; return { false, 8 }; }
+				case '}': { log << warn << "wrong }.";     return { false, 9 }; }
+				case ']': { log << warn << "wrong ].";     return { false, 10 }; }
+
+				default:
+				{
+					bool e = false;
+					_Value _value;
+					Convert(_value, &value - buf, buf_len, false, buf, 1, e, use_lex_string);
+					if (e) { log << warn << "convert error"; return { false, 11 }; }
+					_stack[depth - 1]->as_object()->add_element(
+						std::move(_key), std::move(_value));
+				}
+				break;
+				}
+			}
+
+		object_continue:
+			switch (buf[simdjson_imple->structural_indexes[idx++]]) {
+			case ',':
+			{
+				auto& key_char = buf[simdjson_imple->structural_indexes[idx++]];
+				if (_simdjson_unlikely(key_char != '"')) {
+					log << warn << "Key string missing at beginning of field in object";
+					return { false, 12 };
+				}
+				bool e = false;
+				Convert(_key, &key_char - buf, buf_len, true, buf, 1, e, use_lex_string);
+				if (e) { log << warn << "convert error"; return { false, 12 }; }
+			}
+			goto object_field;
+			case '}': goto scope_end;
+			case ':': { log << warn << "wrong colon."; return { false, 13 }; }
+			default:  log << warn << "No comma between object fields"; return { false, 14 };
+			}
+
+		scope_end:
+			--count_; //
+
+			if (depth == 0) {
+				log << warn << "scope_end at depth 0";
+				return { false, 23 };
+			}
+			depth--;
+			if (depth == 0) goto document_end;
+			// ✅ is_array 벡터 없이 포인터로 직접 판별
+			if (_stack[depth - 1]->is_array()) goto array_continue;
+			goto object_continue;
+
+			// ── Array ─────────────────────────────────────────────────────────────
+		array_begin:
+			depth++;
+
+		array_value:
+			{
+				auto& value = buf[simdjson_imple->structural_indexes[idx++]];
+				switch (value) {
+
+				case '{':
+					count_open_ = std::max(count_open_, ++count_);
+					_stack[depth - 1]->as_array()->add_element(
+						Object::Make());
+					if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
+						++idx; --count_; break;
+					}
+					{
+						auto* parent = _stack[depth - 1]->as_array();
+						auto* child = &parent->get_value_list(parent->size() - 1);
+						if ((uint64_t)_stack.size() < depth + 1) _stack.push_back(child);
+						else                                      _stack[depth] = child;
+						goto object_begin;
+					}
+
+				case '[':
+					count_open_ = std::max(count_open_, ++count_);
+					_stack[depth - 1]->as_array()->add_element(
+						Array::Make());
+					if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
+						++idx; --count_; break;
+					}
+					{
+						auto* parent = _stack[depth - 1]->as_array();
+						auto* child = &parent->get_value_list(parent->size() - 1);
+						if ((uint64_t)_stack.size() < depth + 1) _stack.push_back(child);
+						else                                      _stack[depth] = child;
+						goto array_begin;
+					}
+
+				case ',': { log << warn << "wrong comma."; return { false, 15 }; }
+				case ':': { log << warn << "wrong colon."; return { false, 16 }; }
+				case '}': { log << warn << "wrong }.";     return { false, 17 }; }
+				case ']': { log << warn << "wrong ].";     return { false, 18 }; }
+
+				default:
+				{
+					_Value _value;
+					bool e = false;
+					Convert(_value, &value - buf, buf_len, false, buf, 1, e, use_lex_string);
+					if (e) { log << warn << "convert error"; return { false, 19 }; }
+					_stack[depth - 1]->as_array()->add_element(std::move(_value));
+				}
+				break;
+				}
+			}
+
+		array_continue:
+			switch (buf[simdjson_imple->structural_indexes[idx++]]) {
+			case ',': goto array_value;
+			case ']': goto scope_end;
+			case ':': { log << warn << "wrong colon."; return { false, 20 }; }
+			default:  log << warn << "Missing comma between array values"; return { false, 21 };
+			}
+
+		document_end:
+			if (idx < simdjson_imple->n_structural_indexes) {
+				log << warn << "More than one JSON value at the root of the document";
+				return { false, 22 };
+			}
+
+			log << info << "max depth " << count_open_ << "\n";
+			const int DEPTH_MAX = 1024;
+			if (count_open_ > DEPTH_MAX) {
+				return { false, -23 };
+			}
+			return { true, 0 };
+		}
+
+		return { false, -1 };
+	}
+
+
+	std::pair<bool, uint64_t> parser::parse(StringView fileName, Document& d, uint64_t thr_num, bool use_lex_string)
 	{
 		if (thr_num <= 0) {
 			thr_num = std::max((int)std::thread::hardware_concurrency() - 2, 1);
@@ -4469,6 +4780,11 @@ public:
 				return { false, 0 };
 			}
 
+			auto a = std::chrono::steady_clock::now();
+			auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(a - _);
+			log << info << dur.count() << "ms\n";
+			_ = std::chrono::steady_clock::now();
+
 			const auto& buf = test_.raw_buf().get();
 			const auto buf_len = test_.raw_len();
 
@@ -4477,8 +4793,8 @@ public:
 			std_vector<int64_t> start(thr_num + 1, 0);
 			//std_vector<int> key;
 
-			auto a = std::chrono::steady_clock::now();
-			auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(a - _);
+			a = std::chrono::steady_clock::now();
+			dur = std::chrono::duration_cast<std::chrono::milliseconds>(a - _);
 			log << info << dur.count() << "ms\n";
 
 
@@ -4561,10 +4877,12 @@ public:
 					}
 
 					if (thr_num > 1) {
+						std_vector<int64_t> count_open_(_set.size(), 0);
+						std_vector<int64_t> count_(_set.size(), 0);
 
 						for (uint64_t i = 0; i < _set.size(); ++i) {
 							thr_result[i] = pool->enqueue(is_valid2, std::ref(test_), start[i], last[i], &start_state[i], &last_state[i],
-								&is_array[i], &is_virtual_array[i], count_vec);
+								&is_array[i], &is_virtual_array[i], count_vec, &count_open_[i], &count_[i]);
 						}
 						std_vector<int> result(_set.size());
 
@@ -4620,15 +4938,34 @@ public:
 						if (false == is_array[0].empty()) {
 							free(count_vec); return { false, -4 };
 						}
+						
+						int64_t sum = count_open_[0];
+
+						for (uint64_t i = 1; i < count_open_.size(); ++i) {
+							sum = std::max(sum, count_[i - 1] + count_open_[i]);
+							count_[i] += count_[i - 1];
+						}
+						log << info << "depth max " << sum << "\n";
+						if (sum > 1024) {
+							free(count_vec); return { false, -10 };
+						}
 					}
 					else {
+						int64_t count_open_ = 0;
+						int64_t count_ = 0;
 						int start_state = 0;
 						int last_state = 0;
 
 						if (!is_valid2(test_, 0, length - 1, &start_state, &last_state,
-							nullptr, nullptr, count_vec)) {
+							nullptr, nullptr, count_vec, &count_open_, &count_)) {
 							free(count_vec);
 							return { false, 0 };
+						}
+					
+						log << info << "depth max " << count_open_ << "\n";
+						
+						if (count_open_ > 1024) {
+							return { false, -10 };
 						}
 					}
 				}
@@ -4647,7 +4984,7 @@ public:
 			LoadData2 p(pool.get());
 						
 			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec, 
-				thr_num, use_heap_string)) // 0 : use all thread..
+				thr_num, use_lex_string)) // 0 : use all thread..
 			{
 				free(count_vec);
 				return { false, 0 };
@@ -4761,7 +5098,7 @@ public:
 	}
 	*/
 	
-	std::pair<bool, uint64_t> parser::parse_str(StringView str, Document& d, uint64_t thr_num, bool use_heap_string)
+	std::pair<bool, uint64_t> parser::parse_str(StringView str, Document& d, uint64_t thr_num, bool use_lex_string)
 	{
 		claujson::clean(d.Get());
 		_Value& ut = d.Get();
@@ -4792,6 +5129,61 @@ public:
 			const auto& buf = test_.raw_buf().get();
 			const auto buf_len = test_.raw_len();
 			auto* simdjson_imple_ = test_.raw_implementation().get();
+
+
+			if (0) {
+				int64_t max_depth = 0;
+				int64_t cur_depth = 0;
+				const auto* indexes = simdjson_imple_->structural_indexes.get();
+				const uint64_t n = simdjson_imple_->n_structural_indexes;
+
+				for (uint64_t i = 0; i < n; ++i) {
+					char ch = buf[indexes[i]];
+					// branch-free 버전
+					cur_depth += (ch == '{') | (ch == '[');
+					cur_depth -= (ch == '}') | (ch == ']');
+					max_depth = max_depth > cur_depth ? max_depth : cur_depth;
+				}
+
+				if (max_depth > 1024) {
+					return { false, -10 }; // too deep.
+				}
+			}
+
+			{
+				const auto* indexes = simdjson_imple_->structural_indexes.get();
+				const uint64_t n = simdjson_imple_->n_structural_indexes;
+
+				std::vector<int64_t> local_max(thr_num, 0);
+				// 각 청크별로 병렬로 depth_max 계산
+				std::vector<std::future<int64_t>> depth_futures(thr_num);
+
+				for (uint64_t i = 0; i < thr_num; ++i) {
+					depth_futures[i] = pool->enqueue([&, i]() -> int64_t {
+						int64_t max_d = 0, cur_d = 0;
+						const uint64_t _end = (i == thr_num - 1) ? (n) : (n / thr_num * (i + 1));
+						for (uint64_t j = n / thr_num * i; j < _end; ++j) {
+							char ch = buf[simdjson_imple_->structural_indexes[j]];
+							cur_d += (ch == '{') | (ch == '[');
+							cur_d -= (ch == '}') | (ch == ']');
+							max_d = max_d > cur_d ? max_d : cur_d;
+						}
+						return max_d;
+						});
+				}
+
+				// is_valid2 결과 기다리는 곳 근처에서
+				for (uint64_t i = 0; i < thr_num; ++i) {
+					local_max[i] = depth_futures[i].get();
+				}
+				int64_t depth = 0;
+				for (uint64_t i = 0; i < thr_num; ++i) {
+					depth += local_max[i];
+				}
+				if (depth > 1024) {
+					return { false, -10 };
+				}
+			}
 
 			std_vector<int64_t> start(thr_num + 1, 0);
 			//std_vector<int> key;
@@ -4871,9 +5263,12 @@ public:
 					log << "malloc fail in parse_str function.";
 					return { false, -55 };
 				}
+				std_vector<int64_t> count_open_(_set.size(), 0);
+				std_vector<int64_t> count_(_set.size(), 0);
+
 				for (uint64_t i = 0; i < _set.size(); ++i) {
 					thr_result[i] = pool->enqueue(is_valid2, std::ref(test_), start[i], last[i], &start_state[i], &last_state[i],
-						&is_array[i], &is_virtual_array[i], count_vec);
+						&is_array[i], &is_virtual_array[i], count_vec, &count_open_[i], &count_[i]);
 				}
 				std_vector<int> vec(_set.size());
 
@@ -4937,6 +5332,15 @@ public:
 					return { false, -4 };
 
 				}
+				int64_t sum = count_open_[0];
+				for (uint64_t i = 1; i < count_open_.size(); ++i) {
+					sum = std::max(sum, count_[i - 1] + count_open_[i]);
+					count_[i] += count_[i - 1];
+				}
+				log << "depth max " << sum << "\n";
+				if (sum > 1024) {
+					free(count_vec); return { false, -10 };
+				}
 			}
 			//else {
 			//	if (!is_valid(test, length)) {
@@ -4955,7 +5359,7 @@ public:
 			LoadData2 p(pool.get());
 
 			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec, 
-				thr_num, use_heap_string)) // 0 : use all thread..
+				thr_num, use_lex_string)) // 0 : use all thread..
 			{
 				free(count_vec);
 				return { false, 0 };
@@ -4974,8 +5378,8 @@ public:
 
 #if __cpp_lib_char8_t
 	// C++20~
-	std::pair<bool, uint64_t> parser::parse_str(std::u8string_view str, Document& d, uint64_t thr_num, bool use_heap_string) {
-		return parse_str(StringView(reinterpret_cast<const char*>(str.data()), str.size()), d, thr_num, use_heap_string);
+	std::pair<bool, uint64_t> parser::parse_str(std::u8string_view str, Document& d, uint64_t thr_num, bool use_lex_string) {
+		return parse_str(StringView(reinterpret_cast<const char*>(str.data()), str.size()), d, thr_num, use_lex_string);
 	}
 #endif
 

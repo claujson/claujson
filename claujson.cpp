@@ -4965,6 +4965,7 @@ public:
 						log << info << "depth max " << count_open_ << "\n";
 						
 						if (count_open_ > 1024) {
+							free(count_vec);
 							return { false, -10 };
 						}
 					}

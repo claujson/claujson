@@ -731,6 +731,7 @@ namespace claujson {
 		return true;
 	}
 
+	//todo - isFirst <- rename? 
 	claujson_inline bool ConvertNumber(claujson::_Value& data, const char* text, uint64_t len, bool isFirst) {
 		thread_local uint64_t copy_len = 0;
 		thread_local std::unique_ptr<uint8_t[]> copy;
@@ -1534,7 +1535,7 @@ public:
 			return pos;
 		}
 
-		 int Merge(StructuredPtr next, StructuredPtr ut, StructuredPtr* ut_next)
+		static int Merge(StructuredPtr next, StructuredPtr ut, StructuredPtr* ut_next)
 		{
 
 			// check!!
@@ -1862,7 +1863,7 @@ public:
 			}
 		}
 
-		 int64_t FindDivisionPlace(char* buf, _simdjson::internal::dom_parser_implementation* imple, int64_t start, int64_t last)
+		static  int64_t FindDivisionPlace(char* buf, _simdjson::internal::dom_parser_implementation* imple, int64_t start, int64_t last)
 		{
 			for (int64_t a = start; a <= last; ++a) {
 				auto& x = imple->structural_indexes[a]; //  token_arr[a];
@@ -1884,9 +1885,22 @@ public:
 			std_vector<int64_t>& start, uint64_t* count_vec,
 
 			 uint64_t parse_num,
-			 bool use_lex_string) // first, strVec.empty() must be true!!
-		{	
-			StructuredPtr _global = (new PartialJson());
+			 bool use_lex_string, State* s) // first, strVec.empty() must be true!!
+		 {	
+			 StructuredPtr _global;
+
+			 if (s) {
+				 //
+			 }
+			 else {
+				 _global = PartialJson::Make();
+			 }
+
+
+			 bool is_first = !s || s->is_first();
+			 bool is_last = !s || s->is_last();
+
+
 			std_vector<StructuredPtr> __global;
 
 			try {
@@ -2018,58 +2032,98 @@ public:
 								}
 							}
 
-							if (__global[start].get_data_size() > 0 && __global[start].get_value_list(0).is_structured()
+
+							if (is_first && __global[start].get_data_size() > 0 && __global[start].get_value_list(0).is_structured()
 								&& (__global[start].get_value_list(0).is_virtual())) {
 								log << warn << "not valid file1\n";
 								throw 1;
 							}
-							if (next[last] && !(next[last].get_parent() == nullptr)) {
+							if (is_last && next[last] && !(next[last].get_parent() == nullptr)) {
 								log << warn << "not valid file2\n";
 								throw 2;
 							}
 
+							if (!s) {
+								int err = Merge(_global, __global[start], &next[start]);
 
-							int err = Merge(_global, __global[start], &next[start]);
-							if (-1 == err || (pivots.size() == 0 && 1 == err)) {
-								log << warn << "not valid file3\n";
-								throw 3;
-							}
-
-							for (uint64_t i = start + 1; i <= last; ++i) {
-
-								if (chk[i]) {
-									continue;
+								if ((-1 == err || (pivots.size() == 0 && 1 == err))) {
+									log << warn << "not valid file3\n";
+									throw 3;
 								}
 
-								// linearly merge and error check...
-								uint64_t before = i - 1;
-								for (uint64_t k = i; k > 0; --k) {
-									if (chk[k - 1] == 0) {
-										before = k - 1;
-										break;
+								for (uint64_t i = start + 1; i <= last; ++i) {
+
+									if (chk[i]) {
+										continue;
+									}
+
+									// linearly merge and error check...
+									uint64_t before = i - 1;
+									for (uint64_t k = i; k > 0; --k) {
+										if (chk[k - 1] == 0) {
+											before = k - 1;
+											break;
+										}
+									}
+
+									int err = Merge(next[before], __global[i], &next[i]);
+
+									if (-1 == err) {
+										log << warn << "chk " << i << " " << __global.size() << "\n";
+										log << warn << "not valid file4\n";
+										throw 4;
+									}
+									else if (i == last && 1 == err) {
+										log << warn << "not valid file5\n";
+										throw 5;
 									}
 								}
+							}
+							else { // when s is not nullptr!
+								int err = s->merge(__global[start], &next[start]);
 
-								int err = Merge(next[before], __global[i], &next[i]);
-
-								if (-1 == err) {
-									log << warn << "chk " << i << " " << __global.size() << "\n";
-									log << warn << "not valid file4\n";
-									throw 4;
+								if (is_first && (-1 == err || (pivots.size() == 0 && 1 == err))) {
+									log << warn << "not valid data1\n";
+									throw 3;
 								}
-								else if (i == last && 1 == err) {
-									log << warn << "not valid file5\n";
-									throw 5;
+
+								for (uint64_t i = start + 1; i <= last; ++i) {
+
+									if (chk[i]) {
+										continue;
+									}
+
+									// linearly merge and error check...
+									uint64_t before = i - 1;
+									for (uint64_t k = i; k > 0; --k) {
+										if (chk[k - 1] == 0) {
+											before = k - 1;
+											break;
+										}
+									}
+
+									int err = s->merge(__global[i], &next[i]);
+
+									if (-1 == err) {
+										log << warn << "chk " << i << " " << __global.size() << "\n";
+										log << warn << "not valid data2\n";
+										throw 4;
+									}
+									else if (is_last && i == last && 1 == err) {
+										log << warn << "not valid data3\n";
+										throw 5;
+									}
 								}
 							}
 						}
+
 						//catch (...) {
 							//throw "in Merge, error";
 						//	return false;
 						//}
 						//
 
-						if (_global.get_data_size() > 1) { // bug fix..
+						if (!s && _global.get_data_size() > 1) { // bug fix..
 							log << warn << "not valid file6\n";
 							throw 6;
 						}
@@ -2081,14 +2135,14 @@ public:
 					}
 					auto a = std::chrono::steady_clock::now();
 
+					if (!s) {
+						if (_global.get_value_list(0).is_structured()) {
+							StructuredPtr x = _global.get_value_list(0);
+							x.set_parent({});
+						}
 
-					if (_global.get_value_list(0).is_structured()) {
-						StructuredPtr x = _global.get_value_list(0);
-						x.set_parent({});
+						global = std::move(_global.get_value_list(0));
 					}
-
-					global = std::move(_global.get_value_list(0));
-
 
 					auto b = std::chrono::steady_clock::now();
 					auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(b - a);
@@ -2104,7 +2158,7 @@ public:
 						__global[i].Delete();
 					}
 				}
-				if (_global) {
+				if (!s && _global) {
 					_global.Delete();
 				}
 				return true;
@@ -2118,7 +2172,7 @@ public:
 						__global[i].Delete();
 					}
 				}
-				if (_global) {
+				if (!s && _global) {
 					_global.Delete();
 				}
 
@@ -2133,7 +2187,7 @@ public:
 						__global[i].Delete();
 					}
 				}
-				if (_global) {
+				if (!s && _global) {
 					_global.Delete();
 				}
 				return false;
@@ -2146,7 +2200,7 @@ public:
 						__global[i].Delete();
 					}
 				}
-				if (_global) {
+				if (!s && _global) {
 					_global.Delete();
 				}
 
@@ -2155,20 +2209,20 @@ public:
 			}
 
 		}
+		 
 		 bool parse(_Value& global, char* buf, uint64_t buf_len,
 
-			_simdjson::internal::dom_parser_implementation* imple,
-			int64_t length, std_vector<int64_t>& start, uint64_t* count_vec, 
+			 _simdjson::internal::dom_parser_implementation* imple,
+			 int64_t length, std_vector<int64_t>& start, uint64_t* count_vec,
 
 			 uint64_t thr_num,
-			 
-			 bool use_lex_string) {
 
-			return _LoadData(global, buf, buf_len, imple, length, start, count_vec, 
+			 bool use_lex_string, State* s) {
 
-				thr_num, use_lex_string);
-		}
+			 return _LoadData(global, buf, buf_len, imple, length, start, count_vec,
 
+				 thr_num, use_lex_string, s);
+		 }
 	private:
 		//                         
 		 static void _write(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty);
@@ -3319,6 +3373,22 @@ public:
 		return std::string(stream.buf(), stream.buf_size());
 	}
 
+	// =========================================================
+	// ParseState 열거형 추가 - state 값의 의미를 명확히 정의
+	// =========================================================
+	enum ParseState {
+		STATE_INIT = -1,  // 초기값 (아직 파싱 시작 전)
+		STATE_OBJECT_BEGIN = 0, 
+		STATE_OBJECT_KEY = 1,
+		STATE_OBJECT_FIELD = 2,
+		STATE_OBJECT_CONT = 3,
+		STATE_SCOPE_END = 4,  // 중간 전이 상태 (최종 상태로 노출 주의)
+		STATE_ARRAY_BEGIN = 5,
+		STATE_ARRAY_VALUE = 6,
+		STATE_ARRAY_CONT = 7,
+		STATE_PRIMITIVE = 8,  // [추가] 루트가 primitive일 때
+	};
+
 	bool is_valid2(_simdjson::dom::parser_for_claujson& dom_parser, uint64_t start, uint64_t last,
 		int* _start_state, int* _last_state,
 		Vector<int8_t>* _is_array, Vector<int8_t>* _is_virtual_array,
@@ -3330,101 +3400,98 @@ public:
 		auto* simdjson_imple = dom_parser.raw_implementation().get();
 		uint64_t idx = start;
 		uint64_t depth = 0;
-		
+
+		bool is_in_array = false;
+		bool is_in_object = false;
+
 		Vector<int8_t> is_array;
 		Vector<int8_t> is_virtual_array;
 		Vector<uint64_t> _stack;
 		int64_t count_open_ = 0;
 		int64_t count_ = 0;
 
-		int state = 0;
+		// [수정] 초기값을 STATE_INIT(-1)으로 설정 → state=0(object_begin)과 구분 가능
+		int state = STATE_INIT;
 		uint64_t no = start;
+
+		// [수정] _start_state도 초기화
+		*_start_state = STATE_INIT;
 
 		if (start > last) {
 			return false;
 		}
 
 		if (start > 0 && start == last) {
-			return false; // 
+			return false;	
 		}
-		//
-// Start the document
-//
-		///if (at_eof()) { return EMPTY; }
 
 		if (simdjson_imple->n_structural_indexes == 0) {
-			return true; // chk?
+			return true;
 		}
-
-		//log_start_value("document");
-		//SIMDJSON_TRY(visitor.visit_document_start(*this));
 
 		//
 		// Read first value
 		//
 		{
-			auto value = buf[simdjson_imple->structural_indexes[idx++]]; //advance();
+			auto value = buf[simdjson_imple->structural_indexes[idx++]];
 
-			// Make sure the outer object or array is closed before continuing; otherwise, there are ways we
-			// could get into memory corruption. See https://github.com/simdjson/simdjson/issues/906
-			//if (!STREAMING) {
 			switch (value) {
 			case '{': if (buf[simdjson_imple->structural_indexes[simdjson_imple->n_structural_indexes - 1]] != '}') {
 				log << warn << ("starting brace unmatched");
-
-				//if (err) {
-				//	*err = 1;
-				//}
-
-				return false;
 			}
 					break;
 			case '[': if (buf[simdjson_imple->structural_indexes[simdjson_imple->n_structural_indexes - 1]] != ']') {
 				log << warn << ("starting bracket unmatched");
-				//if (err) {
-				//	*err = 1;
-				//}
-				return false;
 			}
 					break;
 			}
-			//	}
 
-			switch (value) { // start == 0
-			case '{': { 
+			switch (value) {
+			case '{': {
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
-					++idx; --count_;  log << warn << ("empty object"); count[no++] = 0;
-				break;
-			} *_start_state = 0;  goto object_begin;
+					++idx; --count_; log << warn << ("empty object"); count[no++] = 0;
+					break;
+				}
+				// [수정] goto 전에 _start_state와 state를 함께 세팅
+				*_start_state = STATE_OBJECT_BEGIN;
+				state = STATE_OBJECT_BEGIN;
+				goto object_begin;
 			}
 			case '[': {
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
-					++idx; --count_;  log << warn << ("empty array"); count[no++] = 0;
-				break;
-			} *_start_state = 4;  goto array_begin;
+					++idx; --count_; log << warn << ("empty array"); count[no++] = 0;
+					break;
+				}
+				// [수정] goto 전에 _start_state와 state를 함께 세팅
+				*_start_state = STATE_ARRAY_BEGIN;
+				state = STATE_ARRAY_BEGIN;
+				goto array_begin;
 			}
 
 			default: break;
 			}
 
-
-			if (start > 0 && value == ',') {
+			if (value == ',') {
 				if (idx < simdjson_imple->n_structural_indexes - 1) {
 					if (buf[simdjson_imple->structural_indexes[idx + 1]] == ':') {
 						--idx;
-						*_start_state = 2;
+						// [수정] _start_state와 state를 동시에 세팅하여 불일치 방지
+						*_start_state = STATE_OBJECT_CONT;
+						state = STATE_OBJECT_CONT;
 						goto object_continue;
 					}
 					else {
 						--idx;
-						*_start_state = 6;
+						// [수정] _start_state와 state를 동시에 세팅하여 불일치 방지
+						*_start_state = STATE_ARRAY_CONT;
+						state = STATE_ARRAY_CONT;
 						goto array_continue;
 					}
 				}
-				else { // idx >= n_~~  // error
-					//*err = true;
+				else {
+					//
 					return false;
 				}
 			}
@@ -3436,6 +3503,11 @@ public:
 			case ']':
 			{ log << warn << "not primitive"; return false; } break;
 			}
+
+			// [수정] 루트가 primitive인 경우 명시적으로 STATE_PRIMITIVE 세팅
+			//        (기존: state=0 그대로 → object_begin과 구분 불가)
+			*_start_state = STATE_PRIMITIVE;
+			state = STATE_PRIMITIVE;
 		}
 		goto document_end;
 
@@ -3443,182 +3515,130 @@ public:
 		// Object parser states
 		//
 	object_begin:
-		//log_start_value("object");
+		
 		depth++;
 		count[no] = 0;
-		{
-			if (idx > last) {
-				goto document_end;
-			}
-			//if (err && *err) {
-			//	return false;
-			//}
-		}
-		state = 0;
+		state = STATE_OBJECT_BEGIN;
+		
 		if (is_array.size() < depth) {
 			is_array.push_back(0);
 		}
 
-		_stack.push_back(no++); 
-		//dom_parser.is_array[depth] = false;
+		_stack.push_back(no++);
 		is_array[depth - 1] = 0;
-		//SIMDJSON_TRY(visitor.visit_object_start(*this));
+
+	object_key:
+		state = STATE_OBJECT_KEY;
 
 		{
-			auto key = buf[simdjson_imple->structural_indexes[idx++]]; // advance();
+			auto key = buf[simdjson_imple->structural_indexes[idx++]];
 			if (key != '"') {
 				log << warn << ("Object does not start with a key");
-				//if (err) {
-				//	*err = 1;
-				//}
 				return false;
 			}
-			//SIMDJSON_TRY(visitor.increment_count(*this));
-			//SIMDJSON_TRY(visitor.visit_key(*this, key));
 		}
 
-	object_field:
+	object_field:		
 
-		{
-			if (idx > last) {
-				goto document_end;
-			}
-			//if (err && *err) {
-			//	return false;
-			//}
-		}
-
-		state = 1;
+		state = STATE_OBJECT_FIELD;
 
 		if (_simdjson_unlikely(buf[simdjson_imple->structural_indexes[idx++]] != ':')) { log << warn << ("Missing colon after key in object"); return false; }
 		{
 			auto value = buf[simdjson_imple->structural_indexes[idx++]];
+			is_in_object = true;
 			switch (value) {
 			case '{':
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
 					++idx; --count_; count[no++] = 0;
-				break;
-			}
-					goto object_begin;
+					break;
+				}
+				goto object_begin;
 			case '[':
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
-					++idx; --count_;  count[no++] = 0;
-				break;
-			} 
-					goto array_begin;
-			case ',': { log << warn << "wrong comma.";
-				//if (err) {
-				//	*err = 1;
-				//}
-				return false; }
-			case ':': { log << warn << "wrong colon.";
-				//if (err) {
-				//	*err = 1;
-				//}
-				return false; }
-			case '}': { log << warn << "wrong }.";
-				//if (err) {
-				//	*err = 1;
-				//}
-				return false; }
-			case ']': { log << warn << "wrong ].";
-				//if (err) {
-				//	*err = 1;
-				//}
-				return false; }
-			default: //SIMDJSON_TRY(visitor.visit_primitive(*this, value)); 
-				break;
+					++idx; --count_; count[no++] = 0;
+					break;
+				}
+				goto array_begin;
+			case ',': { log << warn << "wrong comma.";   return false; }
+			case ':': { log << warn << "wrong colon.";   return false; }
+			case '}': { log << warn << "wrong }.";       return false; }
+			case ']': { log << warn << "wrong ].";       return false; }
+			default:  break;
 			}
 		}
 
 	object_continue:
-
+		state = STATE_OBJECT_CONT;
+		is_in_object = true;
 
 		if (!_stack.empty()) {
 			count[_stack.back()]++;
 		}
-		//else {
-			//if (virtual_count == 0) {
-			//	virtual_idx = idx - 1;
-			//}
-			//virtual_count++;
-		//}
 
-		{
-			if (idx > last) {
-				goto document_end;
-			}
-			//if (err && *err) {
-			//	return false;
-			//}
-		}
-		state = 2;
 		switch (buf[simdjson_imple->structural_indexes[idx++]]) {
-		case ',':
-			//SIMDJSON_TRY(visitor.increment_count(*this));
-		{
-			auto key = buf[simdjson_imple->structural_indexes[idx++]]; // advance();
-			if (_simdjson_unlikely(key != '"')) {
-				log << warn << ("Key string missing at beginning of field in object");
-				//if (err) {
-				//	*err = 1;
-				//}
-				return false;
-			}
-			//SIMDJSON_TRY(visitor.visit_key(*this, key));
+		case ',':if (idx > last) {
+			goto document_end;
 		}
-		goto object_field;
-		case '}': goto scope_end;
-		case ':': { log << warn << "wrong colon.";
-			//if (err) {
-			//	*err = 1;
-			//}
-			return false; }
+			goto object_key;
+		case '}': if (idx > last) {
+			goto document_end;
+		}goto scope_end;
+		case ':': { log << warn << "wrong colon."; return false; }
 		default: log << warn << ("No comma between object fields"); return false;
 		}
 
 	scope_end:
 		{
-			--count_; // depth?
-			
-			state = 3;
+			--count_;
+
+			// [수정] scope_end는 중간 전이 상태이므로 STATE_SCOPE_END를 명시하되,
+			//        이후 반드시 다른 상태로 전이됨을 주석으로 명확히 표기
+			// ※ document_end로 탈출할 경우 *_last_state = STATE_SCOPE_END(3)이 되는데,
+			//    이는 "닫힘 직후 문서 종료"를 의미하는 유효한 상태로 간주함.
+			state = STATE_SCOPE_END;
+
 			if (depth > 0) {
-				depth--; is_array.pop_back(); _stack.pop_back(); // if (_stack.empty()) { virtual_count = 0; }
+				depth--; is_array.pop_back(); _stack.pop_back();
 			}
 			else {
-				// depth <= 0.. virtual array or virtual object..
 				switch (buf[simdjson_imple->structural_indexes[idx - 1]]) {
-				case ']': 
-					is_virtual_array.push_back(1); //count[virtual_idx] = virtual_count; virtual_count = 0;
+				case ']':
+					is_virtual_array.push_back(1);
 					break;
 				case '}':
-					is_virtual_array.push_back(0); //count[virtual_idx] = virtual_count;  virtual_count = 0;
+					is_virtual_array.push_back(0);
 					break;
 				}
 			}
 
-			if (idx > last || (start == 0 && depth == 0)) {
+			if (idx > last) {
 				goto document_end;
 			}
 
 			if (depth == 0) {
-				// is in array or object ?
 				if (buf[simdjson_imple->structural_indexes[idx]] == ',') {
 					++idx;
+					
 					if (idx < simdjson_imple->n_structural_indexes - 1) {
 						if (buf[simdjson_imple->structural_indexes[idx + 1]] == ':') {
 							--idx;
+							// [수정] state를 goto 전에 미리 세팅
+							state = STATE_OBJECT_CONT;
 							goto object_continue;
 						}
 						else {
 							--idx;
+							// [수정] state를 goto 전에 미리 세팅
+							state = STATE_ARRAY_CONT;
 							goto array_continue;
 						}
 					}
-					else { // idx >= n_~~  // error
-				//		*err = true;
+					else {
+						if (idx > last) {
+							goto document_end;
+						}
 						return false;
 					}
 				}
@@ -3627,56 +3647,53 @@ public:
 					case ']':
 					case '}':
 						++idx;
+						// scope_end 재진입 시 state는 다시 STATE_SCOPE_END로 세팅됨
 						goto scope_end;
-						break;
 					default:
-						// error
-				//		*err = true;
 						return false;
 					}
 				}
 			}
 
-			if (is_array[depth - 1]) { goto array_continue; }
+			if (is_array[depth - 1]) {
+				// [수정] state를 goto 전에 미리 세팅
+				state = STATE_ARRAY_CONT;
+				goto array_continue;
+			}
+			// [수정] state를 goto 전에 미리 세팅
+			state = STATE_OBJECT_CONT;
 			goto object_continue;
 		}
 
 		//
 		// Array parser states
 		//
-	array_begin:
-		
-		count[no] = 0;
+	array_begin:		
 		{
 			if (idx > last) {
 				goto document_end;
 			}
-			//if (err && *err) {
-			//	return false;
-			//}
 		}
-		state = 4;
-		//log_start_value("array");
+		state = STATE_ARRAY_BEGIN;
+
+		count[no] = 0;
+
 		depth++;
 		if (is_array.size() < depth) { is_array.push_back(1); }
 		is_array[depth - 1] = 1;
 
 		_stack.push_back(no++);
 
-		//SIMDJSON_TRY(visitor.visit_array_start(*this));
-	//	SIMDJSON_TRY(visitor.increment_count(*this));
-
 	array_value:
 		{
 			if (idx > last) {
 				goto document_end;
 			}
-			//if (err && *err) {
-			//	return false;
-			//}
 		}
+		
+		is_in_array = true;
+		state = STATE_ARRAY_VALUE;
 
-		state = 5;
 		{
 			auto value = buf[simdjson_imple->structural_indexes[idx++]];
 			switch (value) {
@@ -3684,83 +3701,55 @@ public:
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
 					++idx; --count_; count[no++] = 0;
-				break; } goto object_begin;
+					break;
+				} goto object_begin;
 			case '[':
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
 					++idx; --count_; count[no++] = 0;
-				break; } goto array_begin;
-			case ',': { log << warn << "wrong comma.";
-				//if (err) {
-				//	*err = 1;
-			//	}
-				return false; }
-			case ':': { log << warn << "wrong colon.";
-				//if (err) {
-				//	*err = 1;
-				//}
-				return false; }
-			case '}': { log << warn << "wrong }.";
-				//if (err) {
-				///	*err = 1;
-				//}
-				return false; }
-			case ']': { log << warn << "wrong ].";
-				//if (err) {
-				//	*err = 1;
-				//}
-				return false; }
+					break;
+				} goto array_begin;
+			case ',': { log << warn << "wrong comma."; return false; }
+			case ':': { log << warn << "wrong colon."; return false; }
+			case '}': { log << warn << "wrong }.";     return false; }
+			case ']': { log << warn << "wrong ].";     return false; }
 			default: break;
 			}
 		}
 
 	array_continue:
-		if (!_stack.empty()) {
-			count[_stack.back()]++;
-		}
-		//else {
-			//if (virtual_count == 0) {
-			//	virtual_idx = idx - 1;
-			//}
-			//virtual_count++;
-		//}
-
 		{
 			if (idx > last) {
 				goto document_end;
 			}
-		//	if (err && *err) {
-			//	return false;
-		//	}
+		}
+		
+		is_in_array = true;
+		state = STATE_ARRAY_CONT;
+
+		if (!_stack.empty()) {
+			count[_stack.back()]++;
 		}
 
-		state = 6;
 		switch (buf[simdjson_imple->structural_indexes[idx++]]) {
 		case ',': goto array_value;
 		case ']': goto scope_end;
-		case ':': { log << warn << "wrong colon.";
-			//if (err) {
-			//	*err = 1;
-			//}
-			return false; }
-		default: log << warn << ("Missing comma between array values");
-			//if (err) {
-			//	*err = 1;
-			//}
-			return false;
+		case ':': { log << warn << "wrong colon."; return false; }
+		default:  log << warn << ("Missing comma between array values"); return false;
 		}
 
 	document_end:
 
+		// [수정] state=STATE_SCOPE_END(3)로 끝나는 경우:
+		//        "닫힘 토큰 처리 직후 문서 종료" → 정상 종료의 일종
+		// [수정] state=STATE_PRIMITIVE(7)로 끝나는 경우:
+		//        "루트가 단일 primitive" → 정상 종료
+		// [수정] state=STATE_INIT(-1)으로 끝나는 경우:
+		//        파싱이 전혀 진행되지 않은 비정상 상태 → 호출자에서 처리 필요
 		*_last_state = state;
 
-		// If we didn't make it to the end, it's an error
 		if (idx <= last) {
-			log << warn << ("More than one JSON value at the root of the document, or extra characters at the end of the JSON!"); // chk...
-
-			//if (err) {
-			//	*err = 1;
-			//}
+			log << warn << ("More than one JSON value at the root of the document, or extra characters at the end of the JSON!");
 			return false;
 		}
 
@@ -4553,7 +4542,7 @@ public:
 				default:
 				{
 					bool e = false;
-					Convert(ut, &value - buf, buf_len, false, buf, 0, e, use_lex_string);
+					Convert(ut, &value - buf, simdjson_imple->structural_indexes[idx], false, buf, 0, e, use_lex_string);
 					if (e) { log << warn << "convert error"; return { false, 3 }; }
 				}
 				break;
@@ -4571,7 +4560,7 @@ public:
 					return { false, 4 };
 				}
 				bool e = false;
-				Convert(_key, &key - buf, buf_len, true, buf, 1, e, use_lex_string);
+				Convert(_key, &key - buf, simdjson_imple->structural_indexes[idx], true, buf, 1, e, use_lex_string);
 				if (e) { log << warn << "convert error"; return { false, 5 }; }
 			}
 
@@ -4624,7 +4613,7 @@ public:
 				{
 					bool e = false;
 					_Value _value;
-					Convert(_value, &value - buf, buf_len, false, buf, 1, e, use_lex_string);
+					Convert(_value, &value - buf, simdjson_imple->structural_indexes[idx], false, buf, 1, e, use_lex_string);
 					if (e) { log << warn << "convert error"; return { false, 11 }; }
 					_stack[depth - 1]->as_object()->add_element(
 						std::move(_key), std::move(_value));
@@ -4643,7 +4632,7 @@ public:
 					return { false, 12 };
 				}
 				bool e = false;
-				Convert(_key, &key_char - buf, buf_len, true, buf, 1, e, use_lex_string);
+				Convert(_key, &key_char - buf, simdjson_imple->structural_indexes[idx], true, buf, 1, e, use_lex_string);
 				if (e) { log << warn << "convert error"; return { false, 12 }; }
 			}
 			goto object_field;
@@ -4713,7 +4702,7 @@ public:
 				{
 					_Value _value;
 					bool e = false;
-					Convert(_value, &value - buf, buf_len, false, buf, 1, e, use_lex_string);
+					Convert(_value, &value - buf, simdjson_imple->structural_indexes[idx], false, buf, 1, e, use_lex_string);
 					if (e) { log << warn << "convert error"; return { false, 19 }; }
 					_stack[depth - 1]->as_array()->add_element(std::move(_value));
 				}
@@ -4936,6 +4925,7 @@ public:
 						}
 
 						if (false == is_array[0].empty()) {
+							std::cout << "false ... " << is_array[0].size() << "\n";
 							free(count_vec); return { false, -4 };
 						}
 						
@@ -4959,6 +4949,7 @@ public:
 						if (!is_valid2(test_, 0, length - 1, &start_state, &last_state,
 							nullptr, nullptr, count_vec, &count_open_, &count_)) {
 							free(count_vec);
+							log << info << "is not valid2\n";
 							return { false, 0 };
 						}
 					
@@ -4985,7 +4976,7 @@ public:
 			LoadData2 p(pool.get());
 						
 			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec, 
-				thr_num, use_lex_string)) // 0 : use all thread..
+				thr_num, use_lex_string, nullptr)) // 0 : use all thread..
 			{
 				free(count_vec);
 				return { false, 0 };
@@ -5104,7 +5095,7 @@ public:
 		claujson::clean(d.Get());
 		_Value& ut = d.Get();
 
-		log << info << str << "\n";
+		//log << info << str << "\n";
 
 		if (thr_num <= 0) {
 			thr_num = std::max((int)std::thread::hardware_concurrency() - 2, 1);
@@ -5121,6 +5112,7 @@ public:
 		{
 			auto x = test_.parse(str.data(), str.length());
 
+
 			if (x.error() != _simdjson::error_code::SUCCESS) {
 				log << warn << "stage1 error : ";
 				log << warn << x.error() << "\n";
@@ -5130,61 +5122,6 @@ public:
 			const auto& buf = test_.raw_buf().get();
 			const auto buf_len = test_.raw_len();
 			auto* simdjson_imple_ = test_.raw_implementation().get();
-
-
-			if (0) {
-				int64_t max_depth = 0;
-				int64_t cur_depth = 0;
-				const auto* indexes = simdjson_imple_->structural_indexes.get();
-				const uint64_t n = simdjson_imple_->n_structural_indexes;
-
-				for (uint64_t i = 0; i < n; ++i) {
-					char ch = buf[indexes[i]];
-					// branch-free 버전
-					cur_depth += (ch == '{') | (ch == '[');
-					cur_depth -= (ch == '}') | (ch == ']');
-					max_depth = max_depth > cur_depth ? max_depth : cur_depth;
-				}
-
-				if (max_depth > 1024) {
-					return { false, -10 }; // too deep.
-				}
-			}
-
-			{
-				const auto* indexes = simdjson_imple_->structural_indexes.get();
-				const uint64_t n = simdjson_imple_->n_structural_indexes;
-
-				std::vector<int64_t> local_max(thr_num, 0);
-				// 각 청크별로 병렬로 depth_max 계산
-				std::vector<std::future<int64_t>> depth_futures(thr_num);
-
-				for (uint64_t i = 0; i < thr_num; ++i) {
-					depth_futures[i] = pool->enqueue([&, i]() -> int64_t {
-						int64_t max_d = 0, cur_d = 0;
-						const uint64_t _end = (i == thr_num - 1) ? (n) : (n / thr_num * (i + 1));
-						for (uint64_t j = n / thr_num * i; j < _end; ++j) {
-							char ch = buf[simdjson_imple_->structural_indexes[j]];
-							cur_d += (ch == '{') | (ch == '[');
-							cur_d -= (ch == '}') | (ch == ']');
-							max_d = max_d > cur_d ? max_d : cur_d;
-						}
-						return max_d;
-						});
-				}
-
-				// is_valid2 결과 기다리는 곳 근처에서
-				for (uint64_t i = 0; i < thr_num; ++i) {
-					local_max[i] = depth_futures[i].get();
-				}
-				int64_t depth = 0;
-				for (uint64_t i = 0; i < thr_num; ++i) {
-					depth += local_max[i];
-				}
-				if (depth > 1024) {
-					return { false, -10 };
-				}
-			}
 
 			std_vector<int64_t> start(thr_num + 1, 0);
 			//std_vector<int> key;
@@ -5219,9 +5156,6 @@ public:
 			
 			std::set<uint64_t> _set;
 			{
-
-				
-
 				//std_vector<uint64_t> start(thr_num + 1);
 				std_vector<uint64_t> last(thr_num);
 
@@ -5330,6 +5264,7 @@ public:
 
 				if (false == is_array[0].empty()) {
 					free(count_vec); 
+					std::cout << is_array[0].size() << "\n";
 					return { false, -4 };
 
 				}
@@ -5360,7 +5295,7 @@ public:
 			LoadData2 p(pool.get());
 
 			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec, 
-				thr_num, use_lex_string)) // 0 : use all thread..
+				thr_num, use_lex_string, nullptr)) // 0 : use all thread..
 			{
 				free(count_vec);
 				return { false, 0 };
@@ -5375,6 +5310,352 @@ public:
 
 		free(count_vec);
 		return  { true, length };
+	}
+
+	State::State() {
+		this->pj = PartialJson::Make();
+		ptr = this->pj;
+	}
+
+	State::~State() {
+		if (this->pj) {
+			clean(this->pj);
+		}
+	}
+
+	// chk clear()?
+	[[nodiscard]]
+	_Value State::release() {
+		auto x = pj.as_partial_json();
+		_Value result = _Value(x);
+		//this->ptr = nullptr;
+		//this->pj.clear(true);
+		return (result);
+	}
+
+	int State::merge(StructuredPtr other, StructuredPtr* other_now) {
+		//
+		int ret = LoadData2::Merge(this->ptr, other, other_now);
+
+		this->ptr = *other_now;
+		
+		return ret;
+	}
+
+	class AutoStateLocal {
+	private:
+		State* s;
+	public:
+		AutoStateLocal(State& s) {
+			this->s = &s;
+		}
+
+		~AutoStateLocal() {
+			this->s->pop();
+			this->s->next();
+		}
+	};
+
+	// only one item json -> [ value ] // chk?
+	std::pair<bool, uint64_t> parser::parse_str_streaming(StringView str, State& s, Document& d, uint64_t thr_num, bool use_lex_string)
+	{
+		//claujson::clean(d.Get());
+
+		_Value& ut = d.Get();
+
+		//log << info << str << "\n";
+
+		if (thr_num <= 0) {
+			thr_num = std::max((int)std::thread::hardware_concurrency() - 2, 1);
+		}
+		if (thr_num <= 0) {
+			thr_num = 1;
+		}
+
+		uint64_t length = 0;
+
+		auto _ = std::chrono::steady_clock::now();
+		uint64_t* count_vec = nullptr;
+
+		{
+			auto _str = s.push(str);
+			if (s.is_last() && s.ends_with_remain()) {
+				// remain exist <- not valid json!
+				log << warn << "not valid json : remain exist";
+				return { false, -111 };
+			}
+			
+			if (str.empty() == false && _str.empty()) {
+				return { true, -1000 };
+			}
+
+			str = _str;	
+		}
+
+		AutoStateLocal local = s;
+
+		{
+			//std::cout << StringView(str.data(), str.size()) << "\n";
+			//std::cout << StringView(str.data(), 16) << "\n";
+			//std::cout << StringView(str.data() + str.size() - 16, 16) << "\n";
+//
+			auto x = test_.parse(str.data(), str.length());
+
+			if (x.error() != _simdjson::error_code::SUCCESS) {
+				log << warn << "stage1 error : ";
+				log << warn << x.error() << "\n";
+
+				return { false, 0 };
+			}
+
+			const auto& buf = test_.raw_buf().get();
+			const auto buf_len = test_.raw_len();
+			auto* simdjson_imple_ = test_.raw_implementation().get();
+
+			std_vector<int64_t> start(thr_num + 1, 0);
+
+			auto a = std::chrono::steady_clock::now();
+			auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(a - _);
+			log << info << dur.count() << "ms\n";
+
+
+			{
+				uint64_t how_many = simdjson_imple_->n_structural_indexes;
+				length = how_many;
+
+				start[0] = 0;
+				for (uint64_t i = 1; i < thr_num; ++i) {
+					start[i] = how_many / thr_num * i;
+				}
+			}
+
+			if (length == 0) {
+				log << warn << "empty string is not valid json";
+				return { false, 0 };
+			}
+
+			auto b = std::chrono::steady_clock::now();
+			dur = std::chrono::duration_cast<std::chrono::milliseconds>(b - a);
+
+			log << info << dur.count() << "ms\n";
+			b = std::chrono::steady_clock::now();
+
+			std::set<uint64_t> _set;
+			{
+				std_vector<uint64_t> last(thr_num);
+
+				std_vector<int> start_state(thr_num, -1);
+				std_vector<int> last_state(thr_num, -1);
+
+				for (uint64_t i = 1; i < thr_num; ++i) {
+					uint64_t middle = length / thr_num * i;
+					for (uint64_t i = middle; i < length; ++i) {
+						if (buf[simdjson_imple_->structural_indexes[i]] == ',') {
+							middle = i; _set.insert(i); break;
+						}
+
+						if (i == length - 1) {
+							middle = length;
+						}
+					}
+				}
+
+				_set.insert(0);
+
+				start.resize(1 + _set.size());
+				last.resize(_set.size());
+
+				int count = 0;
+				for (auto x : _set) {
+					start[count] = x;
+					++count;
+				}
+				start[_set.size()] = length - 1;
+
+				for (uint64_t i = 0; i < _set.size(); ++i) {
+					last[i] = start[i + 1];
+				}
+
+				std_vector<Vector<int8_t>> is_array(_set.size()), is_virtual_array(_set.size());
+				std_vector<std::future<bool>> thr_result(_set.size());
+				count_vec = (uint64_t*)malloc(length * sizeof(uint64_t));
+				if (!count_vec) {
+					log << warn << "malloc fail in parse_str function.";
+					return { false, -55 };
+				}
+				std_vector<int64_t> count_open_(_set.size(), 0);
+				std_vector<int64_t> count_(_set.size(), 0);
+
+				for (uint64_t i = 0; i < _set.size(); ++i) {
+					thr_result[i] = pool->enqueue(is_valid2, std::ref(test_), start[i], last[i], &start_state[i], &last_state[i],
+						&is_array[i], &is_virtual_array[i], count_vec, &count_open_[i], &count_[i]);
+				}
+				
+				std_vector<int> vec(_set.size());
+
+				for (uint64_t i = 0; i < _set.size(); ++i) {
+					vec[i] = (int)thr_result[i].get();
+				}
+
+				bool result = true;
+
+				for (uint64_t i = 0; i < vec.size(); ++i) {
+					if (vec[i] == false) {
+						free(count_vec);
+						return { false, -1 };
+					}
+				}
+
+				for (uint64_t i = 0; i < _set.size() - 1; ++i) {
+					if (start_state[i + 1] != last_state[i]) { // todo - save state in s?
+						free(count_vec);
+						return { false, -2 };
+					}
+				}
+				
+				//chk..
+				if (!s.is_first()) {
+					if (s.next_state == STATE_SCOPE_END && (start_state[0] == STATE_ARRAY_CONT || start_state[0] == STATE_OBJECT_CONT)) {
+						//
+					}
+					else if (s.next_state != start_state[0]) {
+						free(count_vec);
+						// debug.
+						log << info << s.next_state << " " << start_state[0] << "\n";
+						return { false, -22 };
+					}
+				}
+				s.next_state = last_state.back();
+				
+				if (s.is_first()) {
+					if (is_virtual_array[0].empty() == false) { // first block has no virtual array or virtual object.!
+						free(count_vec);
+						return { false, -31 };
+					}
+				}
+
+				if (s.is_first()) {
+					
+					for (uint64_t i = 1; i < _set.size(); ++i) {
+						// first block one more [ or { ... ?
+						if (is_array[0].empty()) {
+							free(count_vec);
+							return { false, -5 };
+						}
+
+						// link check?
+						if (false == is_virtual_array[i].empty()) {
+							//  
+							if (is_array[0].size() >= is_virtual_array[i].size()) {
+								for (uint64_t j = 0; j < is_virtual_array[i].size(); ++j) {
+									if (is_array[0].back() != is_virtual_array[i][j]) {
+										free(count_vec);
+										return { false, -32 };
+									}
+									is_array[0].pop_back();
+								}
+							}
+							else {
+								free(count_vec);
+								return { false, -33 };
+							}
+						}
+
+						for (uint64_t x = 0; x < is_array[i].size(); ++x) {
+							is_array[0].push_back(is_array[i][x]);
+						}
+					}
+
+					if (s.is_last() && false == is_array[0].empty()) {
+						free(count_vec);
+						return { false, -4 };
+					}
+
+					s.is_array = std::move(is_array[0]);
+					log << info << s.is_array.size() << "test\n";
+				}
+				else {
+					for (uint64_t i = 0; i < _set.size(); ++i) {
+						// link check?
+						if (false == is_virtual_array[i].empty()) {
+							//  
+							if (s.is_array.size() >= is_virtual_array[i].size()) {
+								for (uint64_t j = 0; j < is_virtual_array[i].size(); ++j) {
+									if (s.is_array.back() != is_virtual_array[i][j]) {										
+										free(count_vec);
+										log << info << i << " " << j << "\n";
+										return { false, -34 };
+									}
+									s.is_array.pop_back();
+								}
+							}
+							else {
+								free(count_vec);
+								return { false, -35 };
+							}
+						}
+
+						for (uint64_t x = 0; x < is_array[i].size(); ++x) {
+							s.is_array.push_back(is_array[i][x]);
+						}
+					}
+
+
+					log << info << s.is_array.size() << "test\n";
+
+					if (s.is_last() && false == s.is_array.empty()) {
+					free(count_vec);
+					std::cout << s.is_array.size() << "\n";
+						return { false, -4 };
+					}
+				}
+				
+				/*
+				int64_t sum = 0;
+				sum = std::max(sum, s.depth_base + count_open_[0]);
+				count_[0] += s.depth_base;
+				for (uint64_t i = 1; i < count_open_.size(); ++i) {
+					sum = std::max(sum, count_[i - 1] + count_open_[i]);
+					count_[i] += count_[i - 1];
+				}
+				log << info << "depth max " << sum << "\n";
+				if (sum > 1024) {
+					free(count_vec); return { false, -10 };
+				}
+				s.depth_max = sum;
+				s.depth_base = count_.back();
+				*/
+
+				if (s.is_last() && s.depth_base != 0) {
+					log << info << s.depth_base << "\n";
+					log << warn << "depth is not zero.\n";
+				}
+			}
+
+			dur = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - b);
+			log << info << dur.count() << "ms\n";
+
+			b = std::chrono::steady_clock::now();
+
+
+			start[_set.size()] = length;
+			thr_num = _set.size();
+
+			LoadData2 p(pool.get());
+
+			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec,
+				thr_num, use_lex_string, &s)) { // if thr_num is 0 : use all thread?
+				free(count_vec);
+				return { false, 0 };
+			}
+
+			auto c = std::chrono::steady_clock::now();
+			dur = std::chrono::duration_cast<std::chrono::milliseconds>(c - b);
+			log << info << dur.count() << "ms\n";
+
+			free(count_vec);
+			return  { true, length };
+		}
 	}
 
 #if __cpp_lib_char8_t

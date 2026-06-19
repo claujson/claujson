@@ -31,7 +31,12 @@ namespace claujson {
 	}
 
 	PartialJson::PartialJson() : virtualJson(), arr_vec(), obj_data() {
+		//
+	}
 
+
+	_Value PartialJson::Make() {
+		return _Value(new PartialJson());
 	}
 
 	bool PartialJson::is_partial_json() const { return true; }

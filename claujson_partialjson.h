@@ -26,6 +26,9 @@ namespace claujson {
 		PartialJson();
 
 	public:
+
+		 static _Value Make();
+
 		 bool is_partial_json() const;
 
 		 bool is_object() const;

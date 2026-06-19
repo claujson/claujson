@@ -210,6 +210,7 @@ namespace claujson {
 
 
 	public:
+		
 		bool is_valid() const {
 			return type != _ValueType::NOT_VALID && type != _ValueType::_VALUE_TYPE_ERROR;
 		}

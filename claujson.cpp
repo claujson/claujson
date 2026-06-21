@@ -3391,7 +3391,7 @@ public:
 
 	bool is_valid2(_simdjson::dom::parser_for_claujson& dom_parser, uint64_t start, uint64_t last,
 		int* _start_state, int* _last_state,
-		Vector<int8_t>* _is_array, Vector<int8_t>* _is_virtual_array,
+		Vector<int8_t>* _is_array, Vector<int8_t>* _is_virtual_array, bool is_first,
 		uint64_t* count = nullptr, int64_t* _count_open_ = nullptr, int64_t* _count_ = nullptr
 	) {
 
@@ -3401,97 +3401,100 @@ public:
 		uint64_t idx = start;
 		uint64_t depth = 0;
 
-		bool is_in_array = false;
-		bool is_in_object = false;
-
 		Vector<int8_t> is_array;
 		Vector<int8_t> is_virtual_array;
 		Vector<uint64_t> _stack;
 		int64_t count_open_ = 0;
 		int64_t count_ = 0;
 
-		// [수정] 초기값을 STATE_INIT(-1)으로 설정 → state=0(object_begin)과 구분 가능
-		int state = STATE_INIT;
+		int state = 0;
 		uint64_t no = start;
-
-		// [수정] _start_state도 초기화
-		*_start_state = STATE_INIT;
 
 		if (start > last) {
 			return false;
 		}
 
 		if (start > 0 && start == last) {
-			return false;	
+			return false; // 
 		}
+		//
+// Start the document
+//
+		///if (at_eof()) { return EMPTY; }
 
 		if (simdjson_imple->n_structural_indexes == 0) {
-			return true;
+			return true; // chk?
 		}
+
+		//log_start_value("document");
+		//SIMDJSON_TRY(visitor.visit_document_start(*this));
 
 		//
 		// Read first value
 		//
 		{
-			auto value = buf[simdjson_imple->structural_indexes[idx++]];
+			auto value = buf[simdjson_imple->structural_indexes[idx++]]; //advance();
 
+			// Make sure the outer object or array is closed before continuing; otherwise, there are ways we
+			// could get into memory corruption. See https://github.com/simdjson/simdjson/issues/906
+			//if (!STREAMING) {
 			switch (value) {
 			case '{': if (buf[simdjson_imple->structural_indexes[simdjson_imple->n_structural_indexes - 1]] != '}') {
 				log << warn << ("starting brace unmatched");
+
+				//if (err) {
+				//	*err = 1;
+				//}
+
+				//return false;
 			}
 					break;
 			case '[': if (buf[simdjson_imple->structural_indexes[simdjson_imple->n_structural_indexes - 1]] != ']') {
 				log << warn << ("starting bracket unmatched");
+				//if (err) {
+				//	*err = 1;
+				//}
+				//return false;
 			}
 					break;
 			}
+			//	}
 
-			switch (value) {
+			switch (value) { // start == 0
 			case '{': {
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
-					++idx; --count_; log << warn << ("empty object"); count[no++] = 0;
+					++idx; --count_;  log << warn << ("empty object"); count[no++] = 0;
 					break;
-				}
-				// [수정] goto 전에 _start_state와 state를 함께 세팅
-				*_start_state = STATE_OBJECT_BEGIN;
-				state = STATE_OBJECT_BEGIN;
-				goto object_begin;
+				} *_start_state = 0;  goto object_begin;
 			}
 			case '[': {
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
-					++idx; --count_; log << warn << ("empty array"); count[no++] = 0;
+					++idx; --count_;  log << warn << ("empty array"); count[no++] = 0;
 					break;
-				}
-				// [수정] goto 전에 _start_state와 state를 함께 세팅
-				*_start_state = STATE_ARRAY_BEGIN;
-				state = STATE_ARRAY_BEGIN;
-				goto array_begin;
+				} *_start_state = 4;  goto array_begin;
 			}
 
 			default: break;
 			}
 
-			if (value == ',') {
+
+			if ((is_first && start > 0 && value == ',') || (!is_first && value == ',')) {
 				if (idx < simdjson_imple->n_structural_indexes - 1) {
 					if (buf[simdjson_imple->structural_indexes[idx + 1]] == ':') {
 						--idx;
-						// [수정] _start_state와 state를 동시에 세팅하여 불일치 방지
-						*_start_state = STATE_OBJECT_CONT;
-						state = STATE_OBJECT_CONT;
+						*_start_state = 2;
 						goto object_continue;
 					}
 					else {
 						--idx;
-						// [수정] _start_state와 state를 동시에 세팅하여 불일치 방지
-						*_start_state = STATE_ARRAY_CONT;
-						state = STATE_ARRAY_CONT;
+						*_start_state = 6;
 						goto array_continue;
 					}
 				}
-				else {
-					//
+				else { // idx >= n_~~  // error
+					//*err = true;
 					return false;
 				}
 			}
@@ -3501,13 +3504,8 @@ public:
 			case ',':
 			case '}':
 			case ']':
-			{ log << warn << "not primitive"; return false; } break;
+			{ log << warn << "not primitive1" << value << "\n"; return false; } break;
 			}
-
-			// [수정] 루트가 primitive인 경우 명시적으로 STATE_PRIMITIVE 세팅
-			//        (기존: state=0 그대로 → object_begin과 구분 불가)
-			*_start_state = STATE_PRIMITIVE;
-			state = STATE_PRIMITIVE;
 		}
 		goto document_end;
 
@@ -3515,37 +3513,56 @@ public:
 		// Object parser states
 		//
 	object_begin:
-		
+		//log_start_value("object");
 		depth++;
 		count[no] = 0;
-		state = STATE_OBJECT_BEGIN;
-		
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//if (err && *err) {
+			//	return false;
+			//}
+		}
+		state = 0;
 		if (is_array.size() < depth) {
 			is_array.push_back(0);
 		}
 
 		_stack.push_back(no++);
+		//dom_parser.is_array[depth] = false;
 		is_array[depth - 1] = 0;
-
-	object_key:
-		state = STATE_OBJECT_KEY;
+		//SIMDJSON_TRY(visitor.visit_object_start(*this));
 
 		{
-			auto key = buf[simdjson_imple->structural_indexes[idx++]];
+			auto key = buf[simdjson_imple->structural_indexes[idx++]]; // advance();
 			if (key != '"') {
 				log << warn << ("Object does not start with a key");
+				//if (err) {
+				//	*err = 1;
+				//}
 				return false;
 			}
+			//SIMDJSON_TRY(visitor.increment_count(*this));
+			//SIMDJSON_TRY(visitor.visit_key(*this, key));
 		}
 
-	object_field:		
+	object_field:
 
-		state = STATE_OBJECT_FIELD;
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//if (err && *err) {
+			//	return false;
+			//}
+		}
+
+		state = 1;
 
 		if (_simdjson_unlikely(buf[simdjson_imple->structural_indexes[idx++]] != ':')) { log << warn << ("Missing colon after key in object"); return false; }
 		{
 			auto value = buf[simdjson_imple->structural_indexes[idx++]];
-			is_in_object = true;
 			switch (value) {
 			case '{':
 				count_open_ = std::max(count_open_, ++count_);
@@ -3557,88 +3574,131 @@ public:
 			case '[':
 				count_open_ = std::max(count_open_, ++count_);
 				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
-					++idx; --count_; count[no++] = 0;
+					++idx; --count_;  count[no++] = 0;
 					break;
 				}
 				goto array_begin;
-			case ',': { log << warn << "wrong comma.";   return false; }
-			case ':': { log << warn << "wrong colon.";   return false; }
-			case '}': { log << warn << "wrong }.";       return false; }
-			case ']': { log << warn << "wrong ].";       return false; }
-			default:  break;
+			case ',': {
+				log << warn << "wrong comma.";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			case ':': {
+				log << warn << "wrong colon.";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			case '}': {
+				log << warn << "wrong }.";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			case ']': {
+				log << warn << "wrong ].";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			default: //SIMDJSON_TRY(visitor.visit_primitive(*this, value)); 
+				break;
 			}
 		}
 
 	object_continue:
-		state = STATE_OBJECT_CONT;
-		is_in_object = true;
+
 
 		if (!_stack.empty()) {
 			count[_stack.back()]++;
 		}
+		//else {
+			//if (virtual_count == 0) {
+			//	virtual_idx = idx - 1;
+			//}
+			//virtual_count++;
+		//}
 
-		switch (buf[simdjson_imple->structural_indexes[idx++]]) {
-		case ',':if (idx > last) {
-			goto document_end;
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//if (err && *err) {
+			//	return false;
+			//}
 		}
-			goto object_key;
-		case '}': if (idx > last) {
-			goto document_end;
-		}goto scope_end;
-		case ':': { log << warn << "wrong colon."; return false; }
+		state = 2;
+		switch (buf[simdjson_imple->structural_indexes[idx++]]) {
+		case ',':
+			//SIMDJSON_TRY(visitor.increment_count(*this));
+		{
+			auto key = buf[simdjson_imple->structural_indexes[idx++]]; // advance();
+			if (_simdjson_unlikely(key != '"')) {
+				log << warn << ("Key string missing at beginning of field in object");
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			//SIMDJSON_TRY(visitor.visit_key(*this, key));
+		}
+		goto object_field;
+		case '}': goto scope_end;
+		case ':': {
+			log << warn << "wrong colon.";
+			//if (err) {
+			//	*err = 1;
+			//}
+			return false;
+		}
 		default: log << warn << ("No comma between object fields"); return false;
 		}
 
 	scope_end:
 		{
-			--count_;
+			--count_; // depth?
 
-			// [수정] scope_end는 중간 전이 상태이므로 STATE_SCOPE_END를 명시하되,
-			//        이후 반드시 다른 상태로 전이됨을 주석으로 명확히 표기
-			// ※ document_end로 탈출할 경우 *_last_state = STATE_SCOPE_END(3)이 되는데,
-			//    이는 "닫힘 직후 문서 종료"를 의미하는 유효한 상태로 간주함.
-			state = STATE_SCOPE_END;
-
+			state = 3;
 			if (depth > 0) {
-				depth--; is_array.pop_back(); _stack.pop_back();
+				depth--; is_array.pop_back(); _stack.pop_back(); // if (_stack.empty()) { virtual_count = 0; }
 			}
 			else {
+				// depth <= 0.. virtual array or virtual object..
 				switch (buf[simdjson_imple->structural_indexes[idx - 1]]) {
 				case ']':
-					is_virtual_array.push_back(1);
+					is_virtual_array.push_back(1); //count[virtual_idx] = virtual_count; virtual_count = 0;
 					break;
 				case '}':
-					is_virtual_array.push_back(0);
+					is_virtual_array.push_back(0); //count[virtual_idx] = virtual_count;  virtual_count = 0;
 					break;
 				}
 			}
 
-			if (idx > last) {
+			if (idx > last || (start == 0 && depth == 0)) {
 				goto document_end;
 			}
 
 			if (depth == 0) {
+				// is in array or object ?
 				if (buf[simdjson_imple->structural_indexes[idx]] == ',') {
 					++idx;
-					
 					if (idx < simdjson_imple->n_structural_indexes - 1) {
 						if (buf[simdjson_imple->structural_indexes[idx + 1]] == ':') {
 							--idx;
-							// [수정] state를 goto 전에 미리 세팅
-							state = STATE_OBJECT_CONT;
 							goto object_continue;
 						}
 						else {
 							--idx;
-							// [수정] state를 goto 전에 미리 세팅
-							state = STATE_ARRAY_CONT;
 							goto array_continue;
 						}
 					}
-					else {
-						if (idx > last) {
-							goto document_end;
-						}
+					else { // idx >= n_~~  // error
+						//		*err = true;
 						return false;
 					}
 				}
@@ -3647,53 +3707,56 @@ public:
 					case ']':
 					case '}':
 						++idx;
-						// scope_end 재진입 시 state는 다시 STATE_SCOPE_END로 세팅됨
 						goto scope_end;
+						break;
 					default:
+						// error
+				//		*err = true;
 						return false;
 					}
 				}
 			}
 
-			if (is_array[depth - 1]) {
-				// [수정] state를 goto 전에 미리 세팅
-				state = STATE_ARRAY_CONT;
-				goto array_continue;
-			}
-			// [수정] state를 goto 전에 미리 세팅
-			state = STATE_OBJECT_CONT;
+			if (is_array[depth - 1]) { goto array_continue; }
 			goto object_continue;
 		}
 
 		//
 		// Array parser states
 		//
-	array_begin:		
+	array_begin:
+
+		count[no] = 0;
 		{
 			if (idx > last) {
 				goto document_end;
 			}
+			//if (err && *err) {
+			//	return false;
+			//}
 		}
-		state = STATE_ARRAY_BEGIN;
-
-		count[no] = 0;
-
+		state = 4;
+		//log_start_value("array");
 		depth++;
 		if (is_array.size() < depth) { is_array.push_back(1); }
 		is_array[depth - 1] = 1;
 
 		_stack.push_back(no++);
 
+		//SIMDJSON_TRY(visitor.visit_array_start(*this));
+	//	SIMDJSON_TRY(visitor.increment_count(*this));
+
 	array_value:
 		{
 			if (idx > last) {
 				goto document_end;
 			}
+			//if (err && *err) {
+			//	return false;
+			//}
 		}
-		
-		is_in_array = true;
-		state = STATE_ARRAY_VALUE;
 
+		state = 5;
 		{
 			auto value = buf[simdjson_imple->structural_indexes[idx++]];
 			switch (value) {
@@ -3709,47 +3772,87 @@ public:
 					++idx; --count_; count[no++] = 0;
 					break;
 				} goto array_begin;
-			case ',': { log << warn << "wrong comma."; return false; }
-			case ':': { log << warn << "wrong colon."; return false; }
-			case '}': { log << warn << "wrong }.";     return false; }
-			case ']': { log << warn << "wrong ].";     return false; }
+			case ',': {
+				log << warn << "wrong comma.";
+				//if (err) {
+				//	*err = 1;
+			//	}
+				return false;
+			}
+			case ':': {
+				log << warn << "wrong colon.";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			case '}': {
+				log << warn << "wrong }.";
+				//if (err) {
+				///	*err = 1;
+				//}
+				return false;
+			}
+			case ']': {
+				log << warn << "wrong ].";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
 			default: break;
 			}
 		}
 
 	array_continue:
+		if (!_stack.empty()) {
+			count[_stack.back()]++;
+		}
+		//else {
+			//if (virtual_count == 0) {
+			//	virtual_idx = idx - 1;
+			//}
+			//virtual_count++;
+		//}
+
 		{
 			if (idx > last) {
 				goto document_end;
 			}
-		}
-		
-		is_in_array = true;
-		state = STATE_ARRAY_CONT;
-
-		if (!_stack.empty()) {
-			count[_stack.back()]++;
+			//	if (err && *err) {
+				//	return false;
+			//	}
 		}
 
+		state = 6;
 		switch (buf[simdjson_imple->structural_indexes[idx++]]) {
 		case ',': goto array_value;
 		case ']': goto scope_end;
-		case ':': { log << warn << "wrong colon."; return false; }
-		default:  log << warn << ("Missing comma between array values"); return false;
+		case ':': {
+			log << warn << "wrong colon.";
+			//if (err) {
+			//	*err = 1;
+			//}
+			return false;
+		}
+		default: log << warn << ("Missing comma between array values");
+			//if (err) {
+			//	*err = 1;
+			//}
+			return false;
 		}
 
 	document_end:
 
-		// [수정] state=STATE_SCOPE_END(3)로 끝나는 경우:
-		//        "닫힘 토큰 처리 직후 문서 종료" → 정상 종료의 일종
-		// [수정] state=STATE_PRIMITIVE(7)로 끝나는 경우:
-		//        "루트가 단일 primitive" → 정상 종료
-		// [수정] state=STATE_INIT(-1)으로 끝나는 경우:
-		//        파싱이 전혀 진행되지 않은 비정상 상태 → 호출자에서 처리 필요
 		*_last_state = state;
 
+		// If we didn't make it to the end, it's an error
 		if (idx <= last) {
-			log << warn << ("More than one JSON value at the root of the document, or extra characters at the end of the JSON!");
+			log << warn << ("More than one JSON value at the root of the document, or extra characters at the end of the JSON!"); // chk...
+
+			//if (err) {
+			//	*err = 1;
+			//}
 			return false;
 		}
 
@@ -4871,7 +4974,7 @@ public:
 
 						for (uint64_t i = 0; i < _set.size(); ++i) {
 							thr_result[i] = pool->enqueue(is_valid2, std::ref(test_), start[i], last[i], &start_state[i], &last_state[i],
-								&is_array[i], &is_virtual_array[i], count_vec, &count_open_[i], &count_[i]);
+								&is_array[i], &is_virtual_array[i], true, count_vec, &count_open_[i], &count_[i]);
 						}
 						std_vector<int> result(_set.size());
 
@@ -4947,7 +5050,7 @@ public:
 						int last_state = 0;
 
 						if (!is_valid2(test_, 0, length - 1, &start_state, &last_state,
-							nullptr, nullptr, count_vec, &count_open_, &count_)) {
+							nullptr, nullptr, true, count_vec, &count_open_, &count_)) {
 							free(count_vec);
 							log << info << "is not valid2\n";
 							return { false, 0 };
@@ -5203,7 +5306,7 @@ public:
 
 				for (uint64_t i = 0; i < _set.size(); ++i) {
 					thr_result[i] = pool->enqueue(is_valid2, std::ref(test_), start[i], last[i], &start_state[i], &last_state[i],
-						&is_array[i], &is_virtual_array[i], count_vec, &count_open_[i], &count_[i]);
+						&is_array[i], &is_virtual_array[i], true, count_vec, &count_open_[i], &count_[i]);
 				}
 				std_vector<int> vec(_set.size());
 
@@ -5488,7 +5591,7 @@ public:
 
 				for (uint64_t i = 0; i < _set.size(); ++i) {
 					thr_result[i] = pool->enqueue(is_valid2, std::ref(test_), start[i], last[i], &start_state[i], &last_state[i],
-						&is_array[i], &is_virtual_array[i], count_vec, &count_open_[i], &count_[i]);
+						&is_array[i], &is_virtual_array[i], s.is_first(), count_vec, &count_open_[i], &count_[i]);
 				}
 				
 				std_vector<int> vec(_set.size());

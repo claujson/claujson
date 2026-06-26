@@ -657,20 +657,26 @@ namespace claujson {
 		_Value pj;
 		StructuredPtr ptr; 
 		int64_t next_start = 0;
+		int64_t _offset = 0;
 		int first = 0;
 		bool _is_last = false;
 		bool _ends_with_remain = false;
+		bool _return_ = false;
 	public:
 		Vector<int8_t> is_array;
+		std::vector<int8_t> is_in_array;
 		int64_t depth_max = 0;
 		int64_t depth_base = 0;
 		int64_t next_state = 0;
+
 	public:
 		explicit State();
 
 		~State();
 
 	public:
+
+		bool _return() const noexcept { return _return_; }
 
 		int merge(StructuredPtr other, StructuredPtr* other_now);
 
@@ -685,10 +691,16 @@ namespace claujson {
 	private:
 		// if fail? then return empty StringView!
 		StringView _push(StringView s) {
-			
+			_offset = 0;
+
 			if (s.empty()) {
 				next_start = 0;
 				return StringView();
+			}
+			
+			if (_return_) {
+				_offset = 0;
+				_return_ = false;
 			}
 
 			vec.insert(vec.end(), s.data(), s.data() + s.size());
@@ -698,7 +710,9 @@ namespace claujson {
 			//std::cout << "depth base " << this->depth_base << "\n";
 			int64_t depth = this->depth_base;
 			int64_t last_comma = -1;
+			int64_t before_last_comma = -1;
 			int64_t last_depth = 0;
+			int64_t before_last_depth = 0;
 			int64_t count = 0;
 			int64_t count_token = 0;
 			int64_t token_start = 0;
@@ -723,6 +737,7 @@ namespace claujson {
 								this->depth_base = depth;
 								_is_last = true;
 								++first;
+
 								return StringView(vec.data(), count);
 							}
 						}
@@ -756,6 +771,7 @@ namespace claujson {
 								this->depth_base = depth;
 								_is_last = true;
 								++first;
+
 								return StringView(vec.data(), count);
 							}
 						}
@@ -768,9 +784,13 @@ namespace claujson {
 					}
 					else if (x == '[' || x == '{') {
 						depth++; ++count_token;
+						is_in_array.push_back(x == '[');
 					}
 					else if (x == ']' || x == '}') {
-						depth--; ++count_token;
+						if (depth <= 0) {
+							return StringView(); // error
+						}
+						depth--; ++count_token; is_in_array.pop_back();
 						if (depth == 0) {
 							log << info << "chk depth == 0\n";
 							for (uint64_t i = count; i < vec.size(); ++i) {
@@ -783,10 +803,13 @@ namespace claujson {
 							this->depth_base = depth;
 							_is_last = true;
 							++first;
+
 							return StringView(vec.data(), count);
 						}
 					}
 					else if (x == ',') {
+						before_last_comma = last_comma;
+						before_last_depth = last_depth;
 						last_comma = count - 1;
 						last_depth = depth;
 						++count_token;
@@ -811,9 +834,9 @@ namespace claujson {
 				}
 			}
 
-			log << info << "last comma is " << last_comma << "\n";
+			log << info << "last comma is " << before_last_comma << "\n";
 
-			if (last_comma == -1 || last_comma == 0) {
+			if (before_last_comma == -1 || before_last_comma == 0 || before_last_comma == last_comma) {
 				// todo!
 				//std::cout << "last_comma is -1\n";
 				log << info << "last_comma is -1\n";
@@ -821,13 +844,24 @@ namespace claujson {
 				return StringView();
 			}
 			else {
-				next_start = last_comma;
+				next_start = before_last_comma;
 			}
+			_return_ = true;
+			_offset = last_comma - before_last_comma;
+		//	std::cout << "before ... " <<  before_last_comma << " " << last_comma << "\n";
 			++first;
-			this->depth_base = last_depth;
-			return StringView(vec.data(), last_comma + 1); // remain exist
+			this->depth_base = before_last_depth;
+			return StringView(vec.data(), before_last_comma + 1); // remain exist
 		}
 	public:
+
+		int offset() const noexcept {
+			if (_return()) {
+				return _offset;
+			}
+			return 0;
+		}
+
 		void pop() {
 			vec.erase(vec.begin(), vec.begin() + next_start);
 			next_start = 0;
@@ -858,6 +892,9 @@ namespace claujson {
 			this->pj.clear(true);
 			this->ptr = this->pj;
 			this->_ends_with_remain = false;
+			this->is_in_array.clear();
+			this->_return_ = false;
+			this->_offset = 0;
 		}
 
 		_Value release();

@@ -23,533 +23,533 @@
 
 #endif
 
-	namespace claujson {
-		// todo? make Document class? like simdjson?
-		_Value _Value::empty_value{ nullptr, false }; // valid is false..
-		const uint64_t _Value::npos = -1; // 
+namespace claujson {
+	// todo? make Document class? like simdjson?
+	_Value _Value::empty_value{ nullptr, false }; // valid is false..
+	const uint64_t _Value::npos = -1; // 
 #if __cpp_lib_string_view
 
 #else
-		const uint64_t StringView::npos = -1;
+	const uint64_t StringView::npos = -1;
 #endif
 
-		Log::Info info;
-		Log::Warning warn;
+	Log::Info info;
+	Log::Warning warn;
 
 
 
-		const uint64_t StructuredPtr::npos = -1;
-		_Value StructuredPtr::empty_value{ nullptr, false };
+	const uint64_t StructuredPtr::npos = -1;
+	_Value StructuredPtr::empty_value{ nullptr, false };
 
-		Log log;
+	Log log;
 
-		StructuredPtr::StructuredPtr(_Value& x) {
-			arr = x.as_array();
-			if (arr) {
-				type = 1;
-				return;
-			}
-			obj = x.as_object();
-			if (obj) {
-				type = 2;
-				return;
-			}
-			pj = x.as_partial_json();
-			if (pj) {
-				type = 3;
-				return;
-			}
-		}
-
-
-		StructuredPtr::StructuredPtr(const _Value& x) {
-			arr = const_cast<Array*>(x.as_array());
-			if (arr) {
-				type = 1;
-				return;
-			}
-			obj = const_cast<Object*>(x.as_object());
-			if (obj) {
-				type = 2;
-				return;
-			}
-			pj = const_cast<PartialJson*>(x.as_partial_json());
-			if (pj) {
-				type = 3;
-				return;
-			}
-		}
-
-		uint64_t StructuredPtr::get_data_size() const {
-			if (type == 1) {
-				return arr->get_data_size();
-			}
-			if (type == 2) {
-				return obj->get_data_size();
-			}
-			if (type == 3) {
-				return pj->get_data_size();
-			}
-			return 0; // make npos!
-		}
-		uint64_t StructuredPtr::size() const {
-			if (type == 1) {
-				return arr->size();
-			}
-			if (type == 2) {
-				return obj->size();
-			}
-			if (type == 3) {
-				return pj->get_data_size();
-			}
-			return 0;
-		}
-		bool StructuredPtr::empty() const {
-			if (type == 1) {
-				return arr->empty();
-			}
-			if (type == 2) {
-				return obj->empty();
-			}
-			return true;
-		}
-		_Value& StructuredPtr::get_value_list(uint64_t idx) {
-			if (type == 1) {
-				return arr->get_value_list(idx);
-			}
-			if (type == 2) {
-				return obj->get_value_list(idx);
-			}
-			if (type == 3) {
-				return pj->get_value_list(idx);
-			}
-			return empty_value;
-		}
-		_Value& StructuredPtr::get_key_list(uint64_t idx) {
-			if (type == 2) {
-				return obj->get_key_list(idx);
-			}
-			else if (type == 3) {
-				return pj->get_key_list(idx);
-			}
-			return empty_value;
-		}
-		const _Value& StructuredPtr::get_value_list(uint64_t idx) const {
-			if (type == 1) {
-				return arr->get_value_list(idx);
-			}
-			if (type == 2) {
-				return obj->get_value_list(idx);
-			}
-			if (type == 3) {
-				return pj->get_value_list(idx);
-			}
-			return empty_value;
-		}
-		const _Value& StructuredPtr::get_key_list(uint64_t idx) const {
-			if (type == 2) {
-				return obj->get_key_list(idx);
-			}
-			else if (type == 3) {
-				return pj->get_key_list(idx);
-			}
-			return empty_value;
-		}
-		bool StructuredPtr::insert(uint64_t idx, Value val) { // from Array
-			if (type == 1) {
-				return arr->insert(idx, std::move(val));
-			}
-			return false;
-		}
-
-		const _Value& StructuredPtr::get_const_key_list(uint64_t idx) {
-			if (type == 2) {
-				return obj->get_const_key_list(idx);
-			}
-			return empty_value;
-		}
-
-		const _Value& StructuredPtr::get_const_key_list(uint64_t idx) const {
-			if (type == 2) {
-				return obj->get_const_key_list(idx);
-			}
-			return empty_value;
-		}
-
-		bool StructuredPtr::change_key(const _Value& key, Value&& next_key) {
-			if (type == 2) {
-				return obj->change_key(key, std::move(next_key));
-			}
-			return false;
-		}
-		bool StructuredPtr::change_key(uint64_t idx, Value&& next_key) {
-			if (type == 2) {
-				return obj->change_key(idx, std::move(next_key));
-			}
-			return false;
-		}
-
-		bool StructuredPtr::chk_key_dup(uint64_t* idx) const {
-			if (type == 2) {
-				return obj->chk_key_dup(idx);
-			}
-			return false;
-		}
-
-
-		void StructuredPtr::null_parent() {
-			if (type == 1) {
-				arr->null_parent();
-			}
-			else if (type == 2) {
-				obj->null_parent();
-			}
-		}
-		
-		uint64_t StructuredPtr::find_by_key(const _Value & key) const{ // find without key`s converting ( \uxxxx )
-			if (type == 2) {
-				return obj->find(key);
-			}
-			return npos;
-		}
-
-		_Value& StructuredPtr::operator[](const _Value& key) { // if not exist key, then _Value <- is not valid.
-			if (type == 2) {
-				return obj->operator[](key);
-			}
-			return empty_value;
-		}
-		const _Value& StructuredPtr::operator[](const _Value& key) const {// if not exist key, then _Value <- is not valid.
-			if (type == 2) {
-				return obj->operator[](key);
-			}
-			return empty_value;
-		}
-
-		bool StructuredPtr::add_array_element(Value v) {
-			if (type == 1) {
-				return arr->add_element(std::move(v));
-			}
-			if (type == 2) {
-				return false;
-			}
-			if (type == 3) {
-				return pj->add_array_element(std::move(v));
-			}
-			return false;
-		}
-		bool StructuredPtr::add_object_element(Value key, Value v) {
-			if (type == 1) {
-				return false;
-			}
-			if (type == 2) {
-				return obj->add_element(std::move(key), std::move(v));
-			}
-			if (type == 3) {
-				return pj->add_object_element(std::move(key), std::move(v));
-			}
-			return false;
-		}
-
-		uint64_t StructuredPtr::find_by_value(const _Value& value, uint64_t start) const { // find without key`s converting ( \uxxxx )
-			if (type == 1) {
-				return arr->find(value, start);
-			}
-			return npos;
-		}
-		_Value& StructuredPtr::operator[](uint64_t idx) {
-			if (type == 1) {
-				return arr->operator[](idx);
-			}
-			if (type == 2) {
-				return obj->operator[](idx);
-			}
-			return empty_value;
-		}
-
-		const _Value& StructuredPtr::operator[](uint64_t idx) const {
-			if (type == 1) {
-				return arr->operator[](idx);
-			}
-			if (type == 2) {
-				return obj->operator[](idx);
-			}
-			return empty_value;
-		}
-
-		void StructuredPtr::erase(uint64_t idx, bool real) {
-			if (type == 1) {
-				return arr->erase(idx, real);
-			}
-			if (type == 2) {
-				return obj->erase(idx, real);
-			}
-			if (type == 3) {
-				return;
-			}
+	StructuredPtr::StructuredPtr(_Value& x) {
+		arr = x.as_array();
+		if (arr) {
+			type = 1;
 			return;
 		}
-		void StructuredPtr::erase(const _Value& key, bool real) {
-			if (type == 2) {
-				return obj->erase(key, real);
-			}
+		obj = x.as_object();
+		if (obj) {
+			type = 2;
 			return;
 		}
-
-		void StructuredPtr::Delete() {
-			if (type == 1) {
-				delete arr;
-				arr = nullptr;
-			}
-			else if (type == 2) {
-				delete obj;
-				obj = nullptr;
-			}
-			else if (type == 3) {
-				delete pj;
-				pj = nullptr;
-			}
-			type = 0;
-		}
-		void StructuredPtr::clear() {
-			if (type == 1) {
-				return arr->clear();
-			}
-			if (type == 2) {
-				return obj->clear();
-			}
-			if (type == 3) {
-				return pj->clear();
-			}
+		pj = x.as_partial_json();
+		if (pj) {
+			type = 3;
 			return;
-		}
-
-		void StructuredPtr::clear(uint64_t idx) {
-			if (type == 1) {
-				return arr->clear(idx);
-			}
-			if (type == 2) {
-				return obj->clear(idx);
-			}
-			return;
-		}
-
-		bool StructuredPtr::assign_value(uint64_t idx, Value val) {
-			if (type == 1) {
-				return arr->assign_element(idx, std::move(val));
-			}
-			if (type == 2) {
-				return obj->assign_value_element(idx, std::move(val));
-			}
-			return false;
-		}
-
-
-		void StructuredPtr::MergeWith(StructuredPtr j, int start_offset) {
-			if (type == 1) {
-				if (j.is_array()) {
-					return arr->MergeWith(j.arr, start_offset);
-				}
-				if (j.is_object()) {
-					return arr->MergeWith(j.obj, start_offset);
-				}
-				if (j.is_partial_json()) {
-					return arr->MergeWith(j.pj, start_offset);
-				}
-			}
-			if (type == 2) {
-				if (j.is_array()) {
-					return obj->MergeWith(j.arr, start_offset);
-				}
-				if (j.is_object()) {
-					return obj->MergeWith(j.obj, start_offset);
-				}
-				if (j.is_partial_json()) {
-					return obj->MergeWith(j.pj, start_offset);
-				}
-			}
-			if (type == 3) {
-				if (j.is_array()) {
-					return pj->MergeWith(j.arr, start_offset);
-				}
-				if (j.is_object()) {
-					return pj->MergeWith(j.obj, start_offset);
-				}
-				if (j.is_partial_json()) {
-					return pj->MergeWith(j.pj, start_offset);
-				}
-			}
-		}
-
-		void StructuredPtr::reserve_data_list(uint64_t sz) {
-			if (type == 1) {
-				return arr->reserve_data_list(sz);
-			}
-			if (type == 2) {
-				return obj->reserve_data_list(sz);
-			}
-			return;
-		}
-
-		// need rename param....!
-
-		void StructuredPtr::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_lex_string) {
-			if (type == 1) {
-				return arr->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
-			}
-			if (type == 2) {
-				return obj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
-			}
-			if (type == 3) {
-				return pj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
-			}
-			//std::cout << "chk 1";
-			return;
-		}
-
-		void StructuredPtr::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
-			char* buf, uint64_t val_token_idx, bool use_lex_string) {
-			if (type == 1) {
-				return arr->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
-			}
-			if (type == 2) {
-				return obj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
-			}
-			if (type == 3) {
-				return pj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
-			}
-			//std::cout << "chk 2";
-			return;
-		}
-
-		void StructuredPtr::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
-			_ValueType type, uint64_t key_token_idx, bool use_lex_string) {
-			if (this->type == 1) {
-				return arr->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
-			}
-			if (this->type == 2) {
-				return obj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
-			}
-			if (this->type == 3) {
-				return pj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
-			}
-			//std::cout << "chk 3";
-			return;
-		}
-
-		void StructuredPtr::add_user_type(_ValueType type) {
-			if (this->type == 1) {
-				return arr->add_user_type(type);
-			}
-			if (this->type == 2) {
-				return obj->add_user_type(type);
-			}
-			if (this->type == 3) {
-				return pj->add_user_type(type);
-			}
-			//std::cout << "chk 4";
-			return;
-		}
-
-		bool StructuredPtr::is_virtual() const {
-			if (type == 1) {
-				return arr->is_virtual();
-			}
-			if (type == 2) {
-				return obj->is_virtual();
-			}
-			return false;
-		}
-		void StructuredPtr::set_parent(StructuredPtr p) {
-			if (type == 1) {
-				arr->set_parent(p);
-			}
-			else if (type == 2) {
-				obj->set_parent(p);
-			}
-		}
-
-		StructuredPtr StructuredPtr::get_parent() {
-			StructuredPtr p;
-
-			if (type == 1) {
-				p = arr->get_parent();
-			}
-			if (type == 2) {
-				p = obj->get_parent();
-			}
-
-			return p;
-		}
-
-		std::ostream& operator<<(std::ostream& stream, const claujson::_Value& data) {
-
-			if (false == data.is_valid()) {
-				stream << "--not valid\n";
-				return stream;
-			}
-
-			switch (data._type) {
-			case claujson::_ValueType::INT:
-				stream << data._int_val;
-				break;
-			case claujson::_ValueType::UINT:
-				stream << data._uint_val;
-				break;
-			case claujson::_ValueType::FLOAT:
-				stream << data._float_val;
-				break;
-			case claujson::_ValueType::STRING:
-			case claujson::_ValueType::SHORT_STRING:
-			case claujson::_ValueType::STRING_VIEW:
-				stream << "\"" << (data._str_val.data()) << "\"";
-				break;
-			case claujson::_ValueType::BOOL:
-				stream << data._bool_val;
-				break;
-			case claujson::_ValueType::NULL_:
-				stream << "null";
-				break;
-			case claujson::_ValueType::ARRAY:
-			{
-				//	stream << "array_or_object";
-				auto* x = data.as_array();
-				if (x) {
-					stream << "[ ";
-					uint64_t sz = x->get_data_size();
-					for (uint64_t i = 0; i < sz; ++i) {
-						stream << x->get_value_list(i) << " ";
-						if (i < sz - 1) {
-							stream << " , ";
-						}
-					}
-					stream << "]\n";
-				}
-				break;
-			}
-			case claujson::_ValueType::OBJECT:
-			{
-				auto* x = data.as_object();
-				if (x) {
-					stream << "{ ";
-					uint64_t sz = x->get_data_size();
-					for (uint64_t i = 0; i < sz; ++i) {
-						stream << x->get_key_list(i) << " : ";
-						stream << x->get_value_list(i) << " ";
-						if (i < sz - 1) {
-							stream << " , ";
-						}
-					}
-					stream << "}\n";
-				}
-			}
-			break;
-			}
-
-			return stream;
 		}
 	}
+
+
+	StructuredPtr::StructuredPtr(const _Value& x) {
+		arr = const_cast<Array*>(x.as_array());
+		if (arr) {
+			type = 1;
+			return;
+		}
+		obj = const_cast<Object*>(x.as_object());
+		if (obj) {
+			type = 2;
+			return;
+		}
+		pj = const_cast<PartialJson*>(x.as_partial_json());
+		if (pj) {
+			type = 3;
+			return;
+		}
+	}
+
+	uint64_t StructuredPtr::get_data_size() const {
+		if (type == 1) {
+			return arr->get_data_size();
+		}
+		if (type == 2) {
+			return obj->get_data_size();
+		}
+		if (type == 3) {
+			return pj->get_data_size();
+		}
+		return 0; // make npos!
+	}
+	uint64_t StructuredPtr::size() const {
+		if (type == 1) {
+			return arr->size();
+		}
+		if (type == 2) {
+			return obj->size();
+		}
+		if (type == 3) {
+			return pj->get_data_size();
+		}
+		return 0;
+	}
+	bool StructuredPtr::empty() const {
+		if (type == 1) {
+			return arr->empty();
+		}
+		if (type == 2) {
+			return obj->empty();
+		}
+		return true;
+	}
+	_Value& StructuredPtr::get_value_list(uint64_t idx) {
+		if (type == 1) {
+			return arr->get_value_list(idx);
+		}
+		if (type == 2) {
+			return obj->get_value_list(idx);
+		}
+		if (type == 3) {
+			return pj->get_value_list(idx);
+		}
+		return empty_value;
+	}
+	_Value& StructuredPtr::get_key_list(uint64_t idx) {
+		if (type == 2) {
+			return obj->get_key_list(idx);
+		}
+		else if (type == 3) {
+			return pj->get_key_list(idx);
+		}
+		return empty_value;
+	}
+	const _Value& StructuredPtr::get_value_list(uint64_t idx) const {
+		if (type == 1) {
+			return arr->get_value_list(idx);
+		}
+		if (type == 2) {
+			return obj->get_value_list(idx);
+		}
+		if (type == 3) {
+			return pj->get_value_list(idx);
+		}
+		return empty_value;
+	}
+	const _Value& StructuredPtr::get_key_list(uint64_t idx) const {
+		if (type == 2) {
+			return obj->get_key_list(idx);
+		}
+		else if (type == 3) {
+			return pj->get_key_list(idx);
+		}
+		return empty_value;
+	}
+	bool StructuredPtr::insert(uint64_t idx, Value val) { // from Array
+		if (type == 1) {
+			return arr->insert(idx, std::move(val));
+		}
+		return false;
+	}
+
+	const _Value& StructuredPtr::get_const_key_list(uint64_t idx) {
+		if (type == 2) {
+			return obj->get_const_key_list(idx);
+		}
+		return empty_value;
+	}
+
+	const _Value& StructuredPtr::get_const_key_list(uint64_t idx) const {
+		if (type == 2) {
+			return obj->get_const_key_list(idx);
+		}
+		return empty_value;
+	}
+
+	bool StructuredPtr::change_key(const _Value& key, Value&& next_key) {
+		if (type == 2) {
+			return obj->change_key(key, std::move(next_key));
+		}
+		return false;
+	}
+	bool StructuredPtr::change_key(uint64_t idx, Value&& next_key) {
+		if (type == 2) {
+			return obj->change_key(idx, std::move(next_key));
+		}
+		return false;
+	}
+
+	bool StructuredPtr::chk_key_dup(uint64_t* idx) const {
+		if (type == 2) {
+			return obj->chk_key_dup(idx);
+		}
+		return false;
+	}
+
+
+	void StructuredPtr::null_parent() {
+		if (type == 1) {
+			arr->null_parent();
+		}
+		else if (type == 2) {
+			obj->null_parent();
+		}
+	}
+
+	uint64_t StructuredPtr::find_by_key(const _Value& key) const { // find without key`s converting ( \uxxxx )
+		if (type == 2) {
+			return obj->find(key);
+		}
+		return npos;
+	}
+
+	_Value& StructuredPtr::operator[](const _Value& key) { // if not exist key, then _Value <- is not valid.
+		if (type == 2) {
+			return obj->operator[](key);
+		}
+		return empty_value;
+	}
+	const _Value& StructuredPtr::operator[](const _Value& key) const {// if not exist key, then _Value <- is not valid.
+		if (type == 2) {
+			return obj->operator[](key);
+		}
+		return empty_value;
+	}
+
+	bool StructuredPtr::add_array_element(Value v) {
+		if (type == 1) {
+			return arr->add_element(std::move(v));
+		}
+		if (type == 2) {
+			return false;
+		}
+		if (type == 3) {
+			return pj->add_array_element(std::move(v));
+		}
+		return false;
+	}
+	bool StructuredPtr::add_object_element(Value key, Value v) {
+		if (type == 1) {
+			return false;
+		}
+		if (type == 2) {
+			return obj->add_element(std::move(key), std::move(v));
+		}
+		if (type == 3) {
+			return pj->add_object_element(std::move(key), std::move(v));
+		}
+		return false;
+	}
+
+	uint64_t StructuredPtr::find_by_value(const _Value& value, uint64_t start) const { // find without key`s converting ( \uxxxx )
+		if (type == 1) {
+			return arr->find(value, start);
+		}
+		return npos;
+	}
+	_Value& StructuredPtr::operator[](uint64_t idx) {
+		if (type == 1) {
+			return arr->operator[](idx);
+		}
+		if (type == 2) {
+			return obj->operator[](idx);
+		}
+		return empty_value;
+	}
+
+	const _Value& StructuredPtr::operator[](uint64_t idx) const {
+		if (type == 1) {
+			return arr->operator[](idx);
+		}
+		if (type == 2) {
+			return obj->operator[](idx);
+		}
+		return empty_value;
+	}
+
+	void StructuredPtr::erase(uint64_t idx, bool real) {
+		if (type == 1) {
+			return arr->erase(idx, real);
+		}
+		if (type == 2) {
+			return obj->erase(idx, real);
+		}
+		if (type == 3) {
+			return;
+		}
+		return;
+	}
+	void StructuredPtr::erase(const _Value& key, bool real) {
+		if (type == 2) {
+			return obj->erase(key, real);
+		}
+		return;
+	}
+
+	void StructuredPtr::Delete() {
+		if (type == 1) {
+			delete arr;
+			arr = nullptr;
+		}
+		else if (type == 2) {
+			delete obj;
+			obj = nullptr;
+		}
+		else if (type == 3) {
+			delete pj;
+			pj = nullptr;
+		}
+		type = 0;
+	}
+	void StructuredPtr::clear() {
+		if (type == 1) {
+			return arr->clear();
+		}
+		if (type == 2) {
+			return obj->clear();
+		}
+		if (type == 3) {
+			return pj->clear();
+		}
+		return;
+	}
+
+	void StructuredPtr::clear(uint64_t idx) {
+		if (type == 1) {
+			return arr->clear(idx);
+		}
+		if (type == 2) {
+			return obj->clear(idx);
+		}
+		return;
+	}
+
+	bool StructuredPtr::assign_value(uint64_t idx, Value val) {
+		if (type == 1) {
+			return arr->assign_element(idx, std::move(val));
+		}
+		if (type == 2) {
+			return obj->assign_value_element(idx, std::move(val));
+		}
+		return false;
+	}
+
+
+	void StructuredPtr::MergeWith(StructuredPtr j, int start_offset) {
+		if (type == 1) {
+			if (j.is_array()) {
+				return arr->MergeWith(j.arr, start_offset);
+			}
+			if (j.is_object()) {
+				return arr->MergeWith(j.obj, start_offset);
+			}
+			if (j.is_partial_json()) {
+				return arr->MergeWith(j.pj, start_offset);
+			}
+		}
+		if (type == 2) {
+			if (j.is_array()) {
+				return obj->MergeWith(j.arr, start_offset);
+			}
+			if (j.is_object()) {
+				return obj->MergeWith(j.obj, start_offset);
+			}
+			if (j.is_partial_json()) {
+				return obj->MergeWith(j.pj, start_offset);
+			}
+		}
+		if (type == 3) {
+			if (j.is_array()) {
+				return pj->MergeWith(j.arr, start_offset);
+			}
+			if (j.is_object()) {
+				return pj->MergeWith(j.obj, start_offset);
+			}
+			if (j.is_partial_json()) {
+				return pj->MergeWith(j.pj, start_offset);
+			}
+		}
+	}
+
+	void StructuredPtr::reserve_data_list(uint64_t sz) {
+		if (type == 1) {
+			return arr->reserve_data_list(sz);
+		}
+		if (type == 2) {
+			return obj->reserve_data_list(sz);
+		}
+		return;
+	}
+
+	// need rename param....!
+
+	void StructuredPtr::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
+		char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_lex_string) {
+		if (type == 1) {
+			return arr->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
+		}
+		if (type == 2) {
+			return obj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
+		}
+		if (type == 3) {
+			return pj->add_item_type(key_buf_idx, key_next_buf_idx, val_buf_idx, val_next_buf_idx, buf, key_token_idx, val_token_idx, use_lex_string);
+		}
+		//std::cout << "chk 1";
+		return;
+	}
+
+	void StructuredPtr::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
+		char* buf, uint64_t val_token_idx, bool use_lex_string) {
+		if (type == 1) {
+			return arr->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
+		}
+		if (type == 2) {
+			return obj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
+		}
+		if (type == 3) {
+			return pj->add_item_type(val_buf_idx, val_next_buf_idx, buf, val_token_idx, use_lex_string);
+		}
+		//std::cout << "chk 2";
+		return;
+	}
+
+	void StructuredPtr::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
+		_ValueType type, uint64_t key_token_idx, bool use_lex_string) {
+		if (this->type == 1) {
+			return arr->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
+		}
+		if (this->type == 2) {
+			return obj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
+		}
+		if (this->type == 3) {
+			return pj->add_user_type(key_buf_idx, key_next_buf_idx, buf, type, key_token_idx, use_lex_string);
+		}
+		//std::cout << "chk 3";
+		return;
+	}
+
+	void StructuredPtr::add_user_type(_ValueType type) {
+		if (this->type == 1) {
+			return arr->add_user_type(type);
+		}
+		if (this->type == 2) {
+			return obj->add_user_type(type);
+		}
+		if (this->type == 3) {
+			return pj->add_user_type(type);
+		}
+		//std::cout << "chk 4";
+		return;
+	}
+
+	bool StructuredPtr::is_virtual() const {
+		if (type == 1) {
+			return arr->is_virtual();
+		}
+		if (type == 2) {
+			return obj->is_virtual();
+		}
+		return false;
+	}
+	void StructuredPtr::set_parent(StructuredPtr p) {
+		if (type == 1) {
+			arr->set_parent(p);
+		}
+		else if (type == 2) {
+			obj->set_parent(p);
+		}
+	}
+
+	StructuredPtr StructuredPtr::get_parent() {
+		StructuredPtr p;
+
+		if (type == 1) {
+			p = arr->get_parent();
+		}
+		if (type == 2) {
+			p = obj->get_parent();
+		}
+
+		return p;
+	}
+
+	std::ostream& operator<<(std::ostream& stream, const claujson::_Value& data) {
+
+		if (false == data.is_valid()) {
+			stream << "--not valid\n";
+			return stream;
+		}
+
+		switch (data._type) {
+		case claujson::_ValueType::INT:
+			stream << data._int_val;
+			break;
+		case claujson::_ValueType::UINT:
+			stream << data._uint_val;
+			break;
+		case claujson::_ValueType::FLOAT:
+			stream << data._float_val;
+			break;
+		case claujson::_ValueType::STRING:
+		case claujson::_ValueType::SHORT_STRING:
+		case claujson::_ValueType::STRING_VIEW:
+			stream << "\"" << (data._str_val.data()) << "\"";
+			break;
+		case claujson::_ValueType::BOOL:
+			stream << data._bool_val;
+			break;
+		case claujson::_ValueType::NULL_:
+			stream << "null";
+			break;
+		case claujson::_ValueType::ARRAY:
+		{
+			//	stream << "array_or_object";
+			auto* x = data.as_array();
+			if (x) {
+				stream << "[ ";
+				uint64_t sz = x->get_data_size();
+				for (uint64_t i = 0; i < sz; ++i) {
+					stream << x->get_value_list(i) << " ";
+					if (i < sz - 1) {
+						stream << " , ";
+					}
+				}
+				stream << "]\n";
+			}
+			break;
+		}
+		case claujson::_ValueType::OBJECT:
+		{
+			auto* x = data.as_object();
+			if (x) {
+				stream << "{ ";
+				uint64_t sz = x->get_data_size();
+				for (uint64_t i = 0; i < sz; ++i) {
+					stream << x->get_key_list(i) << " : ";
+					stream << x->get_value_list(i) << " ";
+					if (i < sz - 1) {
+						stream << " , ";
+					}
+				}
+				stream << "}\n";
+			}
+		}
+		break;
+		}
+
+		return stream;
+	}
+}
 
 namespace claujson {
 
@@ -695,8 +695,8 @@ namespace claujson {
 		claujson::clean(x);
 	}
 
-	claujson_inline 
-	bool ConvertString(claujson::_Value& data, const char* text, uint64_t len, bool use_lex_string) {
+	claujson_inline
+		bool ConvertString(claujson::_Value& data, const char* text, uint64_t len, bool use_lex_string) {
 		uint8_t sbuf[1024 + _simdjson::_SIMDJSON_PADDING];
 		thread_local std::unique_ptr<uint8_t[]> ubuf; // todo - chk! thread_local?
 		thread_local uint64_t ubuf_len = 0;
@@ -789,12 +789,12 @@ namespace claujson {
 
 	claujson::_Value& Convert(claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
 		char* buf, uint64_t token_idx, bool& err, bool use_lex_string) {
-		
+
 		data.clear(true);
 
 		int ch = buf[buf_idx];
 		//try {
-		
+
 		switch (ch) {
 		case '"':
 			if (ConvertString(data, &buf[buf_idx], next_buf_idx - buf_idx, use_lex_string)) {}
@@ -802,7 +802,7 @@ namespace claujson {
 				goto ERR;
 			}
 			break;
-	
+
 		case '0':
 		case '1': case '2': case '3': case '4':
 		case '5': case '6': case '7': case '8': case '9':	case '-':
@@ -870,7 +870,7 @@ namespace claujson {
 
 	}
 
-	
+
 	uint64_t Structured::find(const _Value& key) const {
 		if (!is_object() || !key.is_str()) { // } || !is_valid()) {
 			return npos;
@@ -965,137 +965,137 @@ namespace claujson {
 	*/
 
 	//Object::Object(bool valid) : Structured(valid) { }
-		
+
 	// class PartialJson, only used in class LoadData2.
 		// todo - rename? PartialNode ?
-class StrStream {
-private:
-	//std::string m_buffer;
-	//fmt::memory_buffer m_buffer;
-	_simdjson::builder::string_builder m_buffer;
-	//char temp[4096];
-public:
-	StrStream() {
-		//
-	}
-
-public:
-
-	const char* buf() const {
-		return m_buffer.view()->data();
-	}
-
-	uint64_t buf_size() const {
-		return m_buffer.view()->size();
-	}
-
-	StrStream& add_start_object(bool pretty) {
-		if (pretty) {
-			m_buffer.append(' ');
-			m_buffer.start_object();
-			m_buffer.append(' ');
+	class StrStream {
+	private:
+		//std::string m_buffer;
+		//fmt::memory_buffer m_buffer;
+		_simdjson::builder::string_builder m_buffer;
+		//char temp[4096];
+	public:
+		StrStream() {
+			//
 		}
-		else {
-			m_buffer.start_object();
-		}
-		return *this;
-	}
 
-	StrStream& add_start_array(bool pretty) {
-		if (pretty) {
-			m_buffer.append(' ');
-			m_buffer.start_array();
-			m_buffer.append(' ');
-		}
-		else {
-			m_buffer.start_array();
-		}
-		return *this;
-	}
-	StrStream& add_end_object(bool pretty) {
-		if (pretty) {
-			m_buffer.append(' ');
-			m_buffer.end_object();
-			m_buffer.append('\n');
-		}
-		else {
-			m_buffer.end_object();
-		}
-		return *this;
-	}
-	StrStream& add_end_array(bool pretty) {
-		if (pretty) {
-			m_buffer.append(' ');
-			m_buffer.end_array();
-			m_buffer.append('\n');
-		}
-		else {
-			m_buffer.end_array();
-		}
-		return *this;
-	}
-	StrStream& add_colon(bool pretty) {
-		if (pretty) {
-			m_buffer.append(' ');
-			m_buffer.append_colon();
-			m_buffer.append(' ');
-		}
-		else {
-			m_buffer.append_colon();
-		}
-		return *this;
-	}
-	StrStream& add_comma(bool pretty) {
-		if (pretty) {
-			m_buffer.append(' ');
-			m_buffer.append_comma();
-			m_buffer.append(' ');
-		}
-		else {
-			m_buffer.append_comma();
-		}
-		return *this;
-	}
+	public:
 
-	void add_float(double x) {
-		m_buffer.append(x);
-	}
+		const char* buf() const {
+			return m_buffer.view()->data();
+		}
 
-	StrStream& add_int(int64_t x) {
-		m_buffer.append(x);
+		uint64_t buf_size() const {
+			return m_buffer.view()->size();
+		}
 
-		//fmt::format_int fi(x);
-		//m_buffer.append(fi.data(), fi.data() + fi.size());
-		return *this;
-	}
+		StrStream& add_start_object(bool pretty) {
+			if (pretty) {
+				m_buffer.append(' ');
+				m_buffer.start_object();
+				m_buffer.append(' ');
+			}
+			else {
+				m_buffer.start_object();
+			}
+			return *this;
+		}
 
-	StrStream& add_uint(uint64_t x) {
-		m_buffer.append(x);
+		StrStream& add_start_array(bool pretty) {
+			if (pretty) {
+				m_buffer.append(' ');
+				m_buffer.start_array();
+				m_buffer.append(' ');
+			}
+			else {
+				m_buffer.start_array();
+			}
+			return *this;
+		}
+		StrStream& add_end_object(bool pretty) {
+			if (pretty) {
+				m_buffer.append(' ');
+				m_buffer.end_object();
+				m_buffer.append('\n');
+			}
+			else {
+				m_buffer.end_object();
+			}
+			return *this;
+		}
+		StrStream& add_end_array(bool pretty) {
+			if (pretty) {
+				m_buffer.append(' ');
+				m_buffer.end_array();
+				m_buffer.append('\n');
+			}
+			else {
+				m_buffer.end_array();
+			}
+			return *this;
+		}
+		StrStream& add_colon(bool pretty) {
+			if (pretty) {
+				m_buffer.append(' ');
+				m_buffer.append_colon();
+				m_buffer.append(' ');
+			}
+			else {
+				m_buffer.append_colon();
+			}
+			return *this;
+		}
+		StrStream& add_comma(bool pretty) {
+			if (pretty) {
+				m_buffer.append(' ');
+				m_buffer.append_comma();
+				m_buffer.append(' ');
+			}
+			else {
+				m_buffer.append_comma();
+			}
+			return *this;
+		}
 
-		//fmt::format_int fi(x);
-		//m_buffer.append(fi.data(), fi.data() + fi.size());
-		return *this;
-	}
+		void add_float(double x) {
+			m_buffer.append(x);
+		}
 
-	StrStream& add_bool(bool x) {
-		m_buffer.append(x);
+		StrStream& add_int(int64_t x) {
+			m_buffer.append(x);
 
-		return *this;
-	}
+			//fmt::format_int fi(x);
+			//m_buffer.append(fi.data(), fi.data() + fi.size());
+			return *this;
+		}
 
-	StrStream& add_null() {
-		m_buffer.append_null();
+		StrStream& add_uint(uint64_t x) {
+			m_buffer.append(x);
 
-		return *this;
-	}
+			//fmt::format_int fi(x);
+			//m_buffer.append(fi.data(), fi.data() + fi.size());
+			return *this;
+		}
 
-	StrStream& add_str(const char* str, uint64_t len) {
-		m_buffer.append('\"');
-		m_buffer.escape_and_append({ str, len });
-		m_buffer.append('\"');
-		return *this;
-	}
-};
+		StrStream& add_bool(bool x) {
+			m_buffer.append(x);
+
+			return *this;
+		}
+
+		StrStream& add_null() {
+			m_buffer.append_null();
+
+			return *this;
+		}
+
+		StrStream& add_str(const char* str, uint64_t len) {
+			m_buffer.append('\"');
+			m_buffer.escape_and_append({ str, len });
+			m_buffer.append('\"');
+			return *this;
+		}
+	};
 
 	class LoadData2 {
 	private:
@@ -1107,21 +1107,21 @@ public:
 	public:
 		friend class LoadData;
 
-		 uint64_t Size(Array* root) {
+		uint64_t Size(Array* root) {
 			if (root == nullptr) { return 0; }
 			return _Size(root) + 1;
-		 }
-		 uint64_t Size(Object* root) {
-			 if (root == nullptr) { return 0; }
-			 return _Size(root) + 1;
-		 }
+		}
+		uint64_t Size(Object* root) {
+			if (root == nullptr) { return 0; }
+			return _Size(root) + 1;
+		}
 
 
-		 uint64_t _Size(Array* root) {
+		uint64_t _Size(Array* root) {
 			if (root == nullptr) {
 				return 0;
 			}
-			
+
 
 			uint64_t len = root->get_data_size();
 			uint64_t x = 0;
@@ -1144,34 +1144,34 @@ public:
 			return x;
 
 		}
-		 uint64_t _Size(Object* root) {
-			 if (root == nullptr) {
-				 return 0;
-			 }
+		uint64_t _Size(Object* root) {
+			if (root == nullptr) {
+				return 0;
+			}
 
-			 uint64_t len = root->get_data_size();
-			 uint64_t x = 0;
+			uint64_t len = root->get_data_size();
+			uint64_t x = 0;
 
-			 for (uint64_t i = 0; i < len; ++i) {
-				 {
-					 auto* ptr = root->get_value_list(i).as_array();
-					 if (ptr) {
-						 x += Size(ptr);
-					 }
-				 }
-				 {
-					 auto* ptr = root->get_value_list(i).as_object();
-					 if (ptr) {
-						 x += Size(ptr);
-					 }
-				 }
-			 }
+			for (uint64_t i = 0; i < len; ++i) {
+				{
+					auto* ptr = root->get_value_list(i).as_array();
+					if (ptr) {
+						x += Size(ptr);
+					}
+				}
+				{
+					auto* ptr = root->get_value_list(i).as_object();
+					if (ptr) {
+						x += Size(ptr);
+					}
+				}
+			}
 
-			 return x;
+			return x;
 
-		 }
+		}
 
-		 uint64_t Size2(const _Value& root) {
+		uint64_t Size2(const _Value& root) {
 			if (!root.as_array() && !root.as_object()) {
 				return 0;
 			}
@@ -1194,7 +1194,7 @@ public:
 			}
 
 			x += 2; // (ARRAY or OBJECT), END
-			
+
 			if (root.is_array()) {
 				for (uint64_t i = 0; i < len; ++i) {
 					if (root.as_array()->get_value_list(i).as_array()) {
@@ -1224,8 +1224,8 @@ public:
 		}
 
 		// find n node.. , need rename..
-		 void Find2(const _Value& root, const uint64_t n, uint64_t& idx, bool chk_hint, uint64_t& _len, std_vector<uint64_t>& offset,
-			 std_vector<uint64_t>& offset2, std_vector<StructuredPtr>& out, std_vector<int>& hint) {
+		void Find2(const _Value& root, const uint64_t n, uint64_t& idx, bool chk_hint, uint64_t& _len, std_vector<uint64_t>& offset,
+			std_vector<uint64_t>& offset2, std_vector<StructuredPtr>& out, std_vector<int>& hint) {
 			if (idx >= n) {
 				return;
 			}
@@ -1311,7 +1311,7 @@ public:
 		}
 
 
-		 void Divide(StructuredPtr pos, StructuredPtr& result) { // after pos.. -> to result.
+		void Divide(StructuredPtr pos, StructuredPtr& result) { // after pos.. -> to result.
 			if (!pos.is_array() && !pos.is_object()) {
 				return;
 			}
@@ -1319,7 +1319,7 @@ public:
 			StructuredPtr pos_ = pos;
 
 			StructuredPtr parent(pos.get_parent());
-			
+
 			PartialJson* out = new (std::nothrow) PartialJson(); //
 
 			if (out == nullptr) {
@@ -1360,7 +1360,7 @@ public:
 					_Value vrt;
 					if (parent.is_object()) {
 						vrt = Object::MakeVirtual();
-						
+
 						if (vrt.as_object() == nullptr) {
 							delete out;
 							log << warn << "new error";
@@ -1369,7 +1369,7 @@ public:
 					}
 					else if (parent.is_array()) { // parent->is_array()
 						vrt = Array::MakeVirtual();
-					
+
 						if (vrt.as_array() == nullptr) {
 							delete out;
 							log << warn << "new error";
@@ -1435,8 +1435,8 @@ public:
 			result = StructuredPtr(out);
 		}
 
-		 std_vector<claujson::StructuredPtr> Divide2(uint64_t n, claujson::_Value& j, std_vector<claujson::StructuredPtr>& result, 
-			 std_vector<int>& hint) {
+		std_vector<claujson::StructuredPtr> Divide2(uint64_t n, claujson::_Value& j, std_vector<claujson::StructuredPtr>& result,
+			std_vector<int>& hint) {
 			if (j.is_structured() == false) {
 				return { };
 			}
@@ -1446,12 +1446,12 @@ public:
 			}
 			auto a = std::chrono::steady_clock::now();
 			uint64_t len = 0;
-			
-			if (j.is_array()) { len = Size(j.as_array()); }
-			else if(j.is_object()) { len = Size(j.as_object()); }
 
-			auto b= std::chrono::steady_clock::now();
-			auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(b - a); 
+			if (j.is_array()) { len = Size(j.as_array()); }
+			else if (j.is_object()) { len = Size(j.as_object()); }
+
+			auto b = std::chrono::steady_clock::now();
+			auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(b - a);
 			log << info << "size is " << dur.count() << "ms\n";
 			if (len / n == 0) {
 				return { };
@@ -1494,7 +1494,7 @@ public:
 					if (i > 0 && temp_parent[i - 1] == nullptr) {
 						for (uint64_t j = 0; j < i; ++j) {
 							int op = 0;
-							
+
 							Merge2(temp_parent[j], result[j], &temp_parent[j + 1], op);
 
 						}
@@ -1517,7 +1517,7 @@ public:
 				if (i > 0 && temp_parent[i - 1] == nullptr) {
 					for (uint64_t j = 0; j < i; ++j) {
 						int op = 0;
-						
+
 						Merge2(temp_parent[j], result[j], &temp_parent[j + 1], op);
 					}
 
@@ -1598,7 +1598,7 @@ public:
 			}
 		}
 
-		 int Merge2(StructuredPtr next, StructuredPtr ut, StructuredPtr* ut_next, int& op)
+		int Merge2(StructuredPtr next, StructuredPtr ut, StructuredPtr* ut_next, int& op)
 		{
 
 			if (!ut) {
@@ -1677,20 +1677,20 @@ public:
 			bool is_key = false;
 		};
 
-		 static bool __LoadData(char* buf, uint64_t buf_len,
+		static bool __LoadData(char* buf, uint64_t buf_len,
 			_simdjson::internal::dom_parser_implementation* imple,
 			int64_t token_arr_start, uint64_t token_arr_len, StructuredPtr _global,
 			int start_state, int last_state, // this line : now not used..
-			class StructuredPtr* next, uint64_t* count_vec, 
+			class StructuredPtr* next, uint64_t* count_vec,
 
-			 int* err, uint64_t no,
-			 bool use_lex_string)
+			int* err, uint64_t no,
+			bool use_lex_string)
 		{
 			try {
 				if (token_arr_len <= 0) {
 					return false;
 				}
-				
+
 				// token_arr_len >= 1
 
 				uint64_t left_no = token_arr_start;
@@ -1767,7 +1767,7 @@ public:
 						}
 
 						class StructuredPtr pTemp = nowUT.get_value_list(nowUT.get_data_size() - 1);
-						
+
 						braceNum++;
 
 						/// initial new nestedUT.
@@ -1839,7 +1839,7 @@ public:
 						}
 					}
 					break;
-					
+
 					}
 				}
 
@@ -1871,267 +1871,267 @@ public:
 
 				switch ((int)type) {
 				case ',':
-					return a ;
+					return a;
 				default:
 					break;
 				}
 			}
 			return -1;
 		}
-		 
-		 bool _LoadData(_Value& global, char* buf, uint64_t buf_len,
+
+		bool _LoadData(_Value& global, char* buf, uint64_t buf_len,
 
 			_simdjson::internal::dom_parser_implementation* imple, int64_t& length,
 			std_vector<int64_t>& start, uint64_t* count_vec,
 
-			 uint64_t parse_num,
-			 bool use_lex_string, State* s) // first, strVec.empty() must be true!!
-		 {	
-			 StructuredPtr _global;
+			uint64_t parse_num,
+			bool use_lex_string, State* s) // first, strVec.empty() must be true!!
+		{
+			StructuredPtr _global;
 
-			 if (s) {
-				 //
-			 }
-			 else {
-				 _global = PartialJson::Make();
-			 }
+			if (s) {
+				//
+			}
+			else {
+				_global = PartialJson::Make();
+			}
 
 
-			 bool is_first = !s || s->is_first();
-			 bool is_last = !s || s->is_last();
+			bool is_first = !s || s->is_first();
+			bool is_last = !s || s->is_last();
 
 
 			std_vector<StructuredPtr> __global;
 
 			try {
-				 
+
 				{
 					uint64_t pivot_num = parse_num;
-					
-					{ 
-					std::set<int64_t> _pivots;
-					std_vector<int64_t> pivots;
-					//const int64_t num = token_arr_len; //
 
-					if (pivot_num > 0) {
-						std_vector<int64_t> pivot;
-						pivots.reserve(pivot_num + 1);
-						pivot.reserve(pivot_num);
-
-						pivot.push_back(start[0]);
-
-						for (uint64_t i = 1; i < parse_num; ++i) {
-							pivot.push_back(FindDivisionPlace(buf, imple, start[i], start[i + 1] - 1));
-						}
-
-						for (uint64_t i = 0; i < pivot.size(); ++i) {
-							if (pivot[i] != -1) {
-								_pivots.insert(pivot[i]);
-							}
-						}
-
-						for (auto& x : _pivots) {
-							pivots.push_back(x);
-						}
-
-						pivots.push_back(length);
-					}
-					else {
-						pivots.push_back(start[0]);
-						pivots.push_back(length);
-					}
-
-					std_vector<StructuredPtr> next(pivots.size() - 1);
 					{
-						__global = std_vector<StructuredPtr>(pivots.size() - 1);
-						for (uint64_t i = 0; i < __global.size(); ++i) {
-							__global[i] = (new PartialJson());
+						std::set<int64_t> _pivots;
+						std_vector<int64_t> pivots;
+						//const int64_t num = token_arr_len; //
+
+						if (pivot_num > 0) {
+							std_vector<int64_t> pivot;
+							pivots.reserve(pivot_num + 1);
+							pivot.reserve(pivot_num);
+
+							pivot.push_back(start[0]);
+
+							for (uint64_t i = 1; i < parse_num; ++i) {
+								pivot.push_back(FindDivisionPlace(buf, imple, start[i], start[i + 1] - 1));
+							}
+
+							for (uint64_t i = 0; i < pivot.size(); ++i) {
+								if (pivot[i] != -1) {
+									_pivots.insert(pivot[i]);
+								}
+							}
+
+							for (auto& x : _pivots) {
+								pivots.push_back(x);
+							}
+
+							pivots.push_back(length);
+						}
+						else {
+							pivots.push_back(start[0]);
+							pivots.push_back(length);
 						}
 
-						std_vector<std::future<bool>> result(pivots.size() - 1);
-						std_vector<int> err(pivots.size() - 1, 0);
-
+						std_vector<StructuredPtr> next(pivots.size() - 1);
 						{
-							int64_t idx = pivots[1] - pivots[0];
-							int64_t _token_arr_len = idx;
-
-
-							result[0] = pool->enqueue(__LoadData, (buf), buf_len, (imple), start[0], _token_arr_len, (__global[0]), 0, 0,
-								&next[0], count_vec,
-
-								&err[0], 0, use_lex_string);
-						}
-
-						auto a = std::chrono::steady_clock::now();
-
-						for (uint64_t i = 1; i < pivots.size() - 1; ++i) {
-							int64_t _token_arr_len = pivots[i + 1] - pivots[i];
-
-							result[i] = pool->enqueue(__LoadData, (buf), buf_len, (imple), pivots[i], _token_arr_len, (__global[i]), 0, 0,
-								&next[i], count_vec,
-
-								& err[i], i, use_lex_string);
-
-						}
-
-
-						// wait
-						for (uint64_t i = 0; i < result.size(); ++i) {
-							result[i].get();
-						}
-
-						auto b = std::chrono::steady_clock::now();
-						auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(b - a);
-						log << info << "parse1 " << dur.count() << "ms\n";
-
-						// check..
-						for (uint64_t i = 0; i < err.size(); ++i) {
-							switch (err[i]) {
-							case 0:
-								break;
-							default:
-								throw err[i]; 
+							__global = std_vector<StructuredPtr>(pivots.size() - 1);
+							for (uint64_t i = 0; i < __global.size(); ++i) {
+								__global[i] = (new PartialJson());
 							}
-						}
 
-						// Merge
+							std_vector<std::future<bool>> result(pivots.size() - 1);
+							std_vector<int> err(pivots.size() - 1, 0);
 
-						{
-							int i = 0;
-							std_vector<int> chk(parse_num, 0);
-							auto x = next.begin();
-							auto y = __global.begin();
-							while (true) {
-								if ((y)->get_data_size() == 0) {
-									chk[i] = 1;
-								}
+							{
+								int64_t idx = pivots[1] - pivots[0];
+								int64_t _token_arr_len = idx;
 
-								++x;
-								++y;
-								++i;
 
-								if (x == next.end()) {
+								result[0] = pool->enqueue(__LoadData, (buf), buf_len, (imple), start[0], _token_arr_len, (__global[0]), 0, 0,
+									&next[0], count_vec,
+
+									&err[0], 0, use_lex_string);
+							}
+
+							auto a = std::chrono::steady_clock::now();
+
+							for (uint64_t i = 1; i < pivots.size() - 1; ++i) {
+								int64_t _token_arr_len = pivots[i + 1] - pivots[i];
+
+								result[i] = pool->enqueue(__LoadData, (buf), buf_len, (imple), pivots[i], _token_arr_len, (__global[i]), 0, 0,
+									&next[i], count_vec,
+
+									&err[i], i, use_lex_string);
+
+							}
+
+
+							// wait
+							for (uint64_t i = 0; i < result.size(); ++i) {
+								result[i].get();
+							}
+
+							auto b = std::chrono::steady_clock::now();
+							auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(b - a);
+							log << info << "parse1 " << dur.count() << "ms\n";
+
+							// check..
+							for (uint64_t i = 0; i < err.size(); ++i) {
+								switch (err[i]) {
+								case 0:
 									break;
+								default:
+									throw err[i];
 								}
 							}
 
-							uint64_t start = 0;
-							uint64_t last = pivots.size() - 1 - 1;
+							// Merge
 
-							for (uint64_t i = 0; i < pivots.size() - 1; ++i) {
-								if (chk[i] == 0) {
-									start = i;
-									break;
-								}
-							}
-
-							for (uint64_t i = pivots.size() - 1; i > 0; --i) {
-								if (chk[i - 1] == 0) {
-									last = i - 1;
-									break;
-								}
-							}
-
-
-							if (is_first && __global[start].get_data_size() > 0 && __global[start].get_value_list(0).is_structured()
-								&& (__global[start].get_value_list(0).is_virtual())) {
-								log << warn << "not valid file1\n";
-								throw 1;
-							}
-							if (is_last && next[last] && !(next[last].get_parent() == nullptr)) {
-								log << warn << "not valid file2\n";
-								throw 2;
-							}
-
-							if (!s) {
-								int err = Merge(_global, __global[start], &next[start]);
-
-								if ((-1 == err || (pivots.size() == 0 && 1 == err))) {
-									log << warn << "not valid file3\n";
-									throw 3;
-								}
-
-								for (uint64_t i = start + 1; i <= last; ++i) {
-
-									if (chk[i]) {
-										continue;
+							{
+								int i = 0;
+								std_vector<int> chk(parse_num, 0);
+								auto x = next.begin();
+								auto y = __global.begin();
+								while (true) {
+									if ((y)->get_data_size() == 0) {
+										chk[i] = 1;
 									}
 
-									// linearly merge and error check...
-									uint64_t before = i - 1;
-									for (uint64_t k = i; k > 0; --k) {
-										if (chk[k - 1] == 0) {
-											before = k - 1;
-											break;
+									++x;
+									++y;
+									++i;
+
+									if (x == next.end()) {
+										break;
+									}
+								}
+
+								uint64_t start = 0;
+								uint64_t last = pivots.size() - 1 - 1;
+
+								for (uint64_t i = 0; i < pivots.size() - 1; ++i) {
+									if (chk[i] == 0) {
+										start = i;
+										break;
+									}
+								}
+
+								for (uint64_t i = pivots.size() - 1; i > 0; --i) {
+									if (chk[i - 1] == 0) {
+										last = i - 1;
+										break;
+									}
+								}
+
+
+								if (is_first && __global[start].get_data_size() > 0 && __global[start].get_value_list(0).is_structured()
+									&& (__global[start].get_value_list(0).is_virtual())) {
+									log << warn << "not valid file1\n";
+									throw 1;
+								}
+								if (is_last && next[last] && !(next[last].get_parent() == nullptr)) {
+									log << warn << "not valid file2\n";
+									throw 2;
+								}
+
+								if (!s) {
+									int err = Merge(_global, __global[start], &next[start]);
+
+									if ((-1 == err || (pivots.size() == 0 && 1 == err))) {
+										log << warn << "not valid file3\n";
+										throw 3;
+									}
+
+									for (uint64_t i = start + 1; i <= last; ++i) {
+
+										if (chk[i]) {
+											continue;
+										}
+
+										// linearly merge and error check...
+										uint64_t before = i - 1;
+										for (uint64_t k = i; k > 0; --k) {
+											if (chk[k - 1] == 0) {
+												before = k - 1;
+												break;
+											}
+										}
+
+										int err = Merge(next[before], __global[i], &next[i]);
+
+										if (-1 == err) {
+											log << warn << "chk " << i << " " << __global.size() << "\n";
+											log << warn << "not valid file4\n";
+											throw 4;
+										}
+										else if (i == last && 1 == err) {
+											log << warn << "not valid file5\n";
+											throw 5;
 										}
 									}
-
-									int err = Merge(next[before], __global[i], &next[i]);
-
-									if (-1 == err) {
-										log << warn << "chk " << i << " " << __global.size() << "\n";
-										log << warn << "not valid file4\n";
-										throw 4;
-									}
-									else if (i == last && 1 == err) {
-										log << warn << "not valid file5\n";
-										throw 5;
-									}
 								}
-							}
-							else { // when s is not nullptr!
-								int err = s->merge(__global[start], &next[start]);
+								else { // when s is not nullptr!
+									int err = s->merge(__global[start], &next[start]);
 
-								if (is_first && (-1 == err || (pivots.size() == 0 && 1 == err))) {
-									log << warn << "not valid data1\n";
-									throw 3;
-								}
-
-								for (uint64_t i = start + 1; i <= last; ++i) {
-
-									if (chk[i]) {
-										continue;
+									if (is_first && (-1 == err || (pivots.size() == 0 && 1 == err))) {
+										log << warn << "not valid data1\n";
+										throw 3;
 									}
 
-									// linearly merge and error check...
-									uint64_t before = i - 1;
-									for (uint64_t k = i; k > 0; --k) {
-										if (chk[k - 1] == 0) {
-											before = k - 1;
-											break;
+									for (uint64_t i = start + 1; i <= last; ++i) {
+
+										if (chk[i]) {
+											continue;
+										}
+
+										// linearly merge and error check...
+										uint64_t before = i - 1;
+										for (uint64_t k = i; k > 0; --k) {
+											if (chk[k - 1] == 0) {
+												before = k - 1;
+												break;
+											}
+										}
+
+										int err = s->merge(__global[i], &next[i]);
+
+										if (-1 == err) {
+											log << warn << "chk " << i << " " << __global.size() << "\n";
+											log << warn << "not valid data2\n";
+											throw 4;
+										}
+										else if (is_last && i == last && 1 == err) {
+											log << warn << "not valid data3\n";
+											throw 5;
 										}
 									}
-
-									int err = s->merge(__global[i], &next[i]);
-
-									if (-1 == err) {
-										log << warn << "chk " << i << " " << __global.size() << "\n";
-										log << warn << "not valid data2\n";
-										throw 4;
-									}
-									else if (is_last && i == last && 1 == err) {
-										log << warn << "not valid data3\n";
-										throw 5;
-									}
 								}
 							}
+
+							//catch (...) {
+								//throw "in Merge, error";
+							//	return false;
+							//}
+							//
+
+							if (!s && _global.get_data_size() > 1) { // bug fix..
+								log << warn << "not valid file6\n";
+								throw 6;
+							}
+
+							auto c = std::chrono::steady_clock::now();
+							auto dur2 = std::chrono::duration_cast<std::chrono::milliseconds>(c - b);
+							log << info << "parse2 " << dur2.count() << "ms\n";
 						}
-
-						//catch (...) {
-							//throw "in Merge, error";
-						//	return false;
-						//}
-						//
-
-						if (!s && _global.get_data_size() > 1) { // bug fix..
-							log << warn << "not valid file6\n";
-							throw 6;
-						}
-
-						auto c = std::chrono::steady_clock::now();
-						auto dur2 = std::chrono::duration_cast<std::chrono::milliseconds>(c - b);
-						log << info << "parse2 " << dur2.count() << "ms\n";
-					}
 					}
 					auto a = std::chrono::steady_clock::now();
 
@@ -2194,7 +2194,7 @@ public:
 			}
 			catch (...) {
 
-				log << warn  << "internal error or new error \n";
+				log << warn << "internal error or new error \n";
 				for (uint64_t i = 0; i < __global.size(); ++i) {
 					if (__global[i]) {
 						__global[i].Delete();
@@ -2209,40 +2209,40 @@ public:
 			}
 
 		}
-		 
-		 bool parse(_Value& global, char* buf, uint64_t buf_len,
 
-			 _simdjson::internal::dom_parser_implementation* imple,
-			 int64_t length, std_vector<int64_t>& start, uint64_t* count_vec,
+		bool parse(_Value& global, char* buf, uint64_t buf_len,
 
-			 uint64_t thr_num,
+			_simdjson::internal::dom_parser_implementation* imple,
+			int64_t length, std_vector<int64_t>& start, uint64_t* count_vec,
 
-			 bool use_lex_string, State* s) {
+			uint64_t thr_num,
 
-			 return _LoadData(global, buf, buf_len, imple, length, start, count_vec,
+			bool use_lex_string, State* s) {
 
-				 thr_num, use_lex_string, s);
-		 }
+			return _LoadData(global, buf, buf_len, imple, length, start, count_vec,
+
+				thr_num, use_lex_string, s);
+		}
 	private:
 		//                         
-		 static void _write(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty);
-		 static void _write2(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty);
-		 
-		 static void _write(StrStream& stream, const _Value& data, const int depth, bool pretty);
+		static void _write(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty);
+		static void _write2(StrStream& stream, const _Value& data, std_vector<StructuredPtr>& chk_list, const int depth, bool pretty);
 
-		 static void write_(StrStream& stream, const _Value& global, StructuredPtr temp, bool pretty, bool hint);
+		static void _write(StrStream& stream, const _Value& data, const int depth, bool pretty);
+
+		static void write_(StrStream& stream, const _Value& global, StructuredPtr temp, bool pretty, bool hint);
 
 	public:
 		// test?... just Data has one element 
-		 void write(const std::string& fileName, const _Value& global, bool pretty, bool hint = false);
+		void write(const std::string& fileName, const _Value& global, bool pretty, bool hint = false);
 
-		 void write(std::ostream& stream, const _Value& data, bool pretty);
+		void write(std::ostream& stream, const _Value& data, bool pretty);
 
-		 std::string write_to_str(const _Value& data, bool pretty);
-		 std::string write_to_str2(const _Value& data, bool pretty);
+		std::string write_to_str(const _Value& data, bool pretty);
+		std::string write_to_str2(const _Value& data, bool pretty);
 
-		 void write_parallel(const std::string& fileName, _Value& j, uint64_t thr_num, bool pretty);
-		 void write_parallel2(const std::string& fileName, const _Value& j, uint64_t thr_num, bool pretty);
+		void write_parallel(const std::string& fileName, _Value& j, uint64_t thr_num, bool pretty);
+		void write_parallel2(const std::string& fileName, const _Value& j, uint64_t thr_num, bool pretty);
 
 	};
 	claujson_inline void write_string(StrStream& stream, const StringView str) {
@@ -2814,9 +2814,9 @@ public:
 
 		//std_vector<claujson::StructuredPtr> temp(thr_num, nullptr); //
 		std_vector<claujson::StructuredPtr> temp_parent(thr_num, nullptr);
-		
+
 		auto a = std::chrono::steady_clock::now();
-		
+
 		std_vector<claujson::StructuredPtr> result(thr_num - 1, nullptr);
 
 		std_vector<int> hint(thr_num - 1, false);
@@ -2830,8 +2830,8 @@ public:
 		std_vector<std::future<void>> thr_result(thr_num);
 
 		//temp = Divide2(thr_num, j, result, hint);
-		
-		{	
+
+		{
 			auto n = thr_num;
 			while (true) {
 				if (j.is_structured() == false) {
@@ -2957,7 +2957,7 @@ public:
 						break;
 					}
 
-					thr_result[i] = pool->enqueue(write_, std::ref(stream[i]), 
+					thr_result[i] = pool->enqueue(write_, std::ref(stream[i]),
 						std::cref(result[i - 1].get_value_list(0)), temp_parent[i], pretty, (hint[i - 1]));
 				}
 
@@ -3135,7 +3135,7 @@ public:
 				strStream.add_end_array(pretty); // dd_char(']');
 				//strStream.add_char('\n');
 
-				if ((json_view + 1)->type != 4 && (json_view + 1)->type != 5 && (json_view +1)->type != -1) {
+				if ((json_view + 1)->type != 4 && (json_view + 1)->type != 5 && (json_view + 1)->type != -1) {
 
 					strStream.add_comma(pretty); // (',');
 					//strStream.add_char(' ');
@@ -3257,10 +3257,10 @@ public:
 		size = view_end - view_arr;
 		log << info << "size... " << size << "\n";
 		a = std::chrono::steady_clock::now();
-		
+
 		std_vector<uint64_t> start(thr_num + 1);
 		std_vector<uint64_t> last(thr_num);
-		
+
 		{
 			std::set<uint64_t> _set; // remove dup.
 
@@ -3270,7 +3270,7 @@ public:
 			}
 
 			_set.insert(0);
-			
+
 			start.resize(1 + _set.size());
 			last.resize(_set.size());
 
@@ -3279,7 +3279,7 @@ public:
 				start[count] = x;
 				++count;
 			}
-			
+
 			start.back() = size;
 
 			for (uint64_t i = 0; i < count; ++i) {
@@ -3303,11 +3303,11 @@ public:
 		}
 		else {
 			std_vector<std::thread> thread_print(thr_num);
-			
+
 			for (uint64_t i = 0; i < thread_print.size(); ++i) {
 				thr_result[i] = pool->enqueue(print, view_arr + start[i], view_arr + last[i], std::ref(stream[i]));
 			}
-			
+
 			for (uint64_t i = 0; i < thread_print.size(); ++i) {
 				thr_result[i].get();
 			}
@@ -3328,7 +3328,7 @@ public:
 		b = std::chrono::steady_clock::now();
 		dur = std::chrono::duration_cast<std::chrono::milliseconds>(b - a);
 		log << info << "write to file " << dur.count() << "ms\n";
-	
+
 		free(view_arr);
 	}
 
@@ -3378,7 +3378,7 @@ public:
 	// =========================================================
 	enum ParseState {
 		STATE_INIT = -1,  // 초기값 (아직 파싱 시작 전)
-		STATE_OBJECT_BEGIN = 0, 
+		STATE_OBJECT_BEGIN = 0,
 		STATE_OBJECT_KEY = 1,
 		STATE_OBJECT_FIELD = 2,
 		STATE_OBJECT_CONT = 3,
@@ -3401,31 +3401,25 @@ public:
 		uint64_t idx = start;
 		uint64_t depth = 0;
 
+		bool is_in_array = false;
+		bool is_in_object = false;
+
 		Vector<int8_t> is_array;
 		Vector<int8_t> is_virtual_array;
 		Vector<uint64_t> _stack;
 		int64_t count_open_ = 0;
 		int64_t count_ = 0;
 
-		int state = 0;
+		int state = -1;
 		uint64_t no = start;
 
 		if (start > last) {
+			std::cout << "start > last\n" << start << " " << last << "\n";
 			return false;
-		}
-
-		if (start > 0 && start == last) {
-			return false; // 
 		}
 		//
 // Start the document
 //
-		///if (at_eof()) { return EMPTY; }
-
-		if (simdjson_imple->n_structural_indexes == 0) {
-			return true; // chk?
-		}
-
 		//log_start_value("document");
 		//SIMDJSON_TRY(visitor.visit_document_start(*this));
 
@@ -3679,7 +3673,7 @@ public:
 				}
 			}
 
-			if (idx > last || (start == 0 && depth == 0)) {
+			if (idx > last || (is_first && start == 0 && depth == 0)) {
 				goto document_end;
 			}
 
@@ -3848,6 +3842,492 @@ public:
 
 		// If we didn't make it to the end, it's an error
 		if (idx <= last) {
+
+			log << warn << ("More than one JSON value at the root of the document, or extra characters at the end of the JSON!"); // chk...
+
+			log << info << idx << " " << last << "\n";
+
+			//if (err) {
+			//	*err = 1;
+			//}
+			return false;
+		}
+
+		if (_is_array) {
+			*_is_array = std::move(is_array);
+		}
+
+		if (_is_virtual_array) {
+			*_is_virtual_array = std::move(is_virtual_array);
+		}
+
+		if (_count_open_) {
+			*_count_open_ = count_open_;
+		}
+
+		if (_count_) {
+			*_count_ = count_;
+		}
+
+		return true;
+	}
+
+	bool is_valid3(const char* buf, uint32_t structural_indexes[], uint32_t n_structural_indexes, uint64_t start, uint64_t last,
+		int* _start_state, int* _last_state,
+		Vector<int8_t>* _is_array, Vector<int8_t>* _is_virtual_array, bool is_first,
+		uint64_t* count = nullptr, int64_t* _count_open_ = nullptr, int64_t* _count_ = nullptr
+	) {
+
+		uint64_t idx = start;
+		uint64_t depth = 0;
+
+		Vector<int8_t> is_array;
+		Vector<int8_t> is_virtual_array;
+		Vector<uint64_t> _stack;
+		int64_t count_open_ = 0;
+		int64_t count_ = 0;
+
+		int state = -1;
+		uint64_t no = start;
+
+		if (start >= last) {
+			std::cout << "start >= last\n";
+			return false;
+		}
+
+		//
+// Start the document
+//
+		///if (at_eof()) { return EMPTY; }
+
+		if (n_structural_indexes == 0) {
+			return true; // chk?
+		}
+
+		//log_start_value("document");
+		//SIMDJSON_TRY(visitor.visit_document_start(*this));
+
+		//
+		// Read first value
+		//
+		{
+			auto value = buf[structural_indexes[idx++]]; //advance();
+
+			// Make sure the outer object or array is closed before continuing; otherwise, there are ways we
+			// could get into memory corruption. See https://github.com/simdjson/simdjson/issues/906
+			//if (!STREAMING) {
+			switch (value) {
+			case '{': if (buf[structural_indexes[n_structural_indexes - 1]] != '}') {
+				log << warn << ("starting brace unmatched");
+
+				//if (err) {
+				//	*err = 1;
+				//}
+
+				//return false;
+			}
+					break;
+			case '[': if (buf[structural_indexes[n_structural_indexes - 1]] != ']') {
+				log << warn << ("starting bracket unmatched");
+				//if (err) {
+				//	*err = 1;
+				//}
+				//return false;
+			}
+					break;
+			}
+			//	}
+
+			switch (value) { // start == 0
+			case '{': {
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[structural_indexes[idx]] == '}') {
+					++idx; --count_;  log << warn << ("empty object"); count[no++] = 0;
+					break;
+				} *_start_state = 0;  goto object_begin;
+			}
+			case '[': {
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[structural_indexes[idx]] == ']') {
+					++idx; --count_;  log << warn << ("empty array"); count[no++] = 0;
+					break;
+				} *_start_state = 4;  goto array_begin;
+			}
+
+			default: break;
+			}
+
+
+			if ((is_first && start > 0 && value == ',') || (!is_first && value == ',')) {
+				if (idx < n_structural_indexes - 1) {
+					if (buf[structural_indexes[idx + 1]] == ':') {
+						--idx;
+						*_start_state = 2;
+						goto object_continue;
+					}
+					else {
+						--idx;
+						*_start_state = 6;
+						goto array_continue;
+					}
+				}
+				else { // idx >= n_~~  // error
+					//*err = true;
+					return false;
+				}
+			}
+
+			switch (value) {
+			case ':':
+			case ',':
+			case '}':
+			case ']':
+			{ log << warn << "not primitive1" << value << "\n"; return false; } break;
+			}
+		}
+		goto document_end;
+
+		//
+		// Object parser states
+		//
+	object_begin:
+		//log_start_value("object");
+		depth++;
+		count[no] = 0;
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//if (err && *err) {
+			//	return false;
+			//}
+		}
+		state = 0;
+		if (is_array.size() < depth) {
+			is_array.push_back(0);
+		}
+
+		_stack.push_back(no++);
+		//dom_parser.is_array[depth] = false;
+		is_array[depth - 1] = 0;
+		//SIMDJSON_TRY(visitor.visit_object_start(*this));
+
+		{
+			auto key = buf[structural_indexes[idx++]]; // advance();
+			if (key != '"') {
+				log << warn << ("Object does not start with a key");
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			//SIMDJSON_TRY(visitor.increment_count(*this));
+			//SIMDJSON_TRY(visitor.visit_key(*this, key));
+		}
+
+	object_field:
+
+
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//if (err && *err) {
+			//	return false;
+			//}
+		}
+
+		state = 1;
+
+		if (_simdjson_unlikely(buf[structural_indexes[idx++]] != ':')) { log << warn << ("Missing colon after key in object"); return false; }
+		{
+			auto value = buf[structural_indexes[idx++]];
+			switch (value) {
+			case '{':
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[structural_indexes[idx]] == '}') {
+					++idx; --count_; count[no++] = 0;
+					break;
+				}
+				goto object_begin;
+			case '[':
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[structural_indexes[idx]] == ']') {
+					++idx; --count_;  count[no++] = 0;
+					break;
+				}
+				goto array_begin;
+			case ',': {
+				log << warn << "wrong comma.";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			case ':': {
+				log << warn << "wrong colon.";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			case '}': {
+				log << warn << "wrong }.";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			case ']': {
+				log << warn << "wrong ].";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			default: //SIMDJSON_TRY(visitor.visit_primitive(*this, value)); 
+				break;
+			}
+		}
+
+	object_continue:
+
+
+		state = 2;
+		if (!_stack.empty()) {
+			count[_stack.back()]++;
+		}
+		//else {
+			//if (virtual_count == 0) {
+			//	virtual_idx = idx - 1;
+			//}
+			//virtual_count++;
+		//}
+
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//if (err && *err) {
+			//	return false;
+			//}
+		}
+		switch (buf[structural_indexes[idx++]]) {
+		case ',':
+			//SIMDJSON_TRY(visitor.increment_count(*this));
+		{
+			auto key = buf[structural_indexes[idx++]]; // advance();
+			if (_simdjson_unlikely(key != '"')) {
+				log << warn << ("Key string missing at beginning of field in object");
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			//SIMDJSON_TRY(visitor.visit_key(*this, key));
+		}
+		goto object_field;
+		case '}': goto scope_end;
+		case ':': {
+			log << warn << "wrong colon.";
+			//if (err) {
+			//	*err = 1;
+			//}
+			return false;
+		}
+		default: log << warn << ("No comma between object fields"); return false;
+		}
+
+	scope_end:
+		{
+			--count_; // depth?
+
+			state = 3;
+			if (depth > 0) {
+				depth--; is_array.pop_back(); _stack.pop_back(); // if (_stack.empty()) { virtual_count = 0; }
+			}
+			else {
+				// depth <= 0.. virtual array or virtual object..
+				switch (buf[structural_indexes[idx - 1]]) {
+				case ']':
+					is_virtual_array.push_back(1); //count[virtual_idx] = virtual_count; virtual_count = 0;
+					break;
+				case '}':
+					is_virtual_array.push_back(0); //count[virtual_idx] = virtual_count;  virtual_count = 0;
+					break;
+				}
+			}
+
+			if (idx > last || (start == 0 && depth == 0)) {
+				goto document_end;
+			}
+
+			if (depth == 0) {
+				// is in array or object ?
+				if (buf[structural_indexes[idx]] == ',') {
+					++idx;
+					if (idx < n_structural_indexes - 1) {
+						if (buf[structural_indexes[idx + 1]] == ':') {
+							--idx;
+							goto object_continue;
+						}
+						else {
+							--idx;
+							goto array_continue;
+						}
+					}
+					else { // idx >= n_~~  // error
+						//		*err = true;
+						return false;
+					}
+				}
+				else {
+					switch (buf[structural_indexes[idx]]) {
+					case ']':
+					case '}':
+						++idx;
+						goto scope_end;
+						break;
+					default:
+						// error
+				//		*err = true;
+						return false;
+					}
+				}
+			}
+
+			if (is_array[depth - 1]) { goto array_continue; }
+			goto object_continue;
+		}
+
+		//
+		// Array parser states
+		//
+	array_begin:
+
+		count[no] = 0;
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//if (err && *err) {
+			//	return false;
+			//}
+		}
+		state = 4;
+		//log_start_value("array");
+		depth++;
+		if (is_array.size() < depth) { is_array.push_back(1); }
+		is_array[depth - 1] = 1;
+
+		_stack.push_back(no++);
+
+		//SIMDJSON_TRY(visitor.visit_array_start(*this));
+	//	SIMDJSON_TRY(visitor.increment_count(*this));
+
+	array_value:
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//if (err && *err) {
+			//	return false;
+			//}
+		}
+
+		state = 5;
+		{
+			auto value = buf[structural_indexes[idx++]];
+			switch (value) {
+			case '{':
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[structural_indexes[idx]] == '}') {
+					++idx; --count_; count[no++] = 0;
+					break;
+				} goto object_begin;
+			case '[':
+				count_open_ = std::max(count_open_, ++count_);
+				if (buf[structural_indexes[idx]] == ']') {
+					++idx; --count_; count[no++] = 0;
+					break;
+				} goto array_begin;
+			case ',': {
+				log << warn << "wrong comma.";
+				//if (err) {
+				//	*err = 1;
+			//	}
+				return false;
+			}
+			case ':': {
+				log << warn << "wrong colon.";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			case '}': {
+				log << warn << "wrong }.";
+				//if (err) {
+				///	*err = 1;
+				//}
+				return false;
+			}
+			case ']': {
+				log << warn << "wrong ].";
+				//if (err) {
+				//	*err = 1;
+				//}
+				return false;
+			}
+			default: break;
+			}
+		}
+
+	array_continue:
+		if (!_stack.empty()) {
+			count[_stack.back()]++;
+		}
+		//else {
+			//if (virtual_count == 0) {
+			//	virtual_idx = idx - 1;
+			//}
+			//virtual_count++;
+		//}
+
+		{
+			if (idx > last) {
+				goto document_end;
+			}
+			//	if (err && *err) {
+				//	return false;
+			//	}
+		}
+
+		state = 6;
+		switch (buf[structural_indexes[idx++]]) {
+		case ',': goto array_value;
+		case ']': goto scope_end;
+		case ':': {
+			log << warn << "wrong colon.";
+			//if (err) {
+			//	*err = 1;
+			//}
+			return false;
+		}
+		default: log << warn << ("Missing comma between array values");
+			//if (err) {
+			//	*err = 1;
+			//}
+			return false;
+		}
+
+	document_end:
+
+		// If we didn't make it to the end, it's an error
+		if (idx <= last) {
+
+			//std::cout << "\n" << idx << " " << last << "\n";
+
 			log << warn << ("More than one JSON value at the root of the document, or extra characters at the end of the JSON!"); // chk...
 
 			//if (err) {
@@ -3931,12 +4411,16 @@ public:
 			//	}
 
 			switch (value) {
-			case '{': { if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
-				++idx; log << warn << ("empty object"); break;
-			} goto object_begin; }
-			case '[': { if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
-				++idx; log << warn << ("empty array"); break;
-			} goto array_begin; }
+			case '{': {
+				if (buf[simdjson_imple->structural_indexes[idx]] == '}') {
+					++idx; log << warn << ("empty object"); break;
+				} goto object_begin;
+			}
+			case '[': {
+				if (buf[simdjson_imple->structural_indexes[idx]] == ']') {
+					++idx; log << warn << ("empty array"); break;
+				} goto array_begin;
+			}
 
 			default: break;
 			}
@@ -3961,7 +4445,7 @@ public:
 		if (is_array.size() < depth) {
 			is_array.push_back(0);
 		}
-		
+
 		//dom_parser.is_array[depth] = false;
 		is_array[depth - 1] = 0;
 		//SIMDJSON_TRY(visitor.visit_object_start(*this));
@@ -4006,26 +4490,34 @@ public:
 			switch (value) {
 			case '{': if (buf[simdjson_imple->structural_indexes[idx]] == '}') { ++idx; break; } goto object_begin;
 			case '[': if (buf[simdjson_imple->structural_indexes[idx]] == ']') { ++idx; break; } goto array_begin;
-			case ',': { log << warn << "wrong comma.";
+			case ',': {
+				log << warn << "wrong comma.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case ':': { log << warn << "wrong colon.";
+				return false;
+			}
+			case ':': {
+				log << warn << "wrong colon.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case '}': { log << warn << "wrong }.";
+				return false;
+			}
+			case '}': {
+				log << warn << "wrong }.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case ']': { log << warn << "wrong ].";
+				return false;
+			}
+			case ']': {
+				log << warn << "wrong ].";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
+				return false;
+			}
 			default: //SIMDJSON_TRY(visitor.visit_primitive(*this, value)); 
 				break;
 			}
@@ -4057,11 +4549,13 @@ public:
 		}
 		goto object_field;
 		case '}': goto scope_end;
-		case ':': { log << warn << "wrong colon.";
+		case ':': {
+			log << warn << "wrong colon.";
 			if (err) {
 				*err = 1;
 			}
-			return false; }
+			return false;
+		}
 		default: log << warn << ("No comma between object fields"); return false;
 		}
 
@@ -4109,26 +4603,34 @@ public:
 			switch (value) {
 			case '{': if (buf[simdjson_imple->structural_indexes[idx]] == '}') { ++idx; break; } goto object_begin;
 			case '[': if (buf[simdjson_imple->structural_indexes[idx]] == ']') { ++idx; break; } goto array_begin;
-			case ',': { log << warn << "wrong comma.";
+			case ',': {
+				log << warn << "wrong comma.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case ':': { log << warn << "wrong colon.";
+				return false;
+			}
+			case ':': {
+				log << warn << "wrong colon.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case '}': { log << warn << "wrong }.";
+				return false;
+			}
+			case '}': {
+				log << warn << "wrong }.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case ']': { log << warn << "wrong ].";
+				return false;
+			}
+			case ']': {
+				log << warn << "wrong ].";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
+				return false;
+			}
 			default: break;
 			}
 		}
@@ -4146,11 +4648,13 @@ public:
 		switch (buf[simdjson_imple->structural_indexes[idx++]]) {
 		case ',': goto array_value;
 		case ']': goto scope_end;
-		case ':': { log << warn << "wrong colon.";
+		case ':': {
+			log << warn << "wrong colon.";
 			if (err) {
 				*err = 1;
 			}
-			return false; }
+			return false;
+		}
 		default: log << warn << ("Missing comma between array values");
 			if (err) {
 				*err = 1;
@@ -4233,12 +4737,16 @@ public:
 			//	}
 
 			switch (value) {
-			case '}': { if (idx >= 0 && buf[simdjson_imple->structural_indexes[idx]] == '{') {
-				--idx; log << warn << ("empty object"); break;
-			} goto scope_end; }
-			case ']': { if (idx >= 0 && buf[simdjson_imple->structural_indexes[idx]] == '[') {
-				--idx; log << warn << ("empty array"); break;
-			} goto scope_end; }
+			case '}': {
+				if (idx >= 0 && buf[simdjson_imple->structural_indexes[idx]] == '{') {
+					--idx; log << warn << ("empty object"); break;
+				} goto scope_end;
+			}
+			case ']': {
+				if (idx >= 0 && buf[simdjson_imple->structural_indexes[idx]] == '[') {
+					--idx; log << warn << ("empty array"); break;
+				} goto scope_end;
+			}
 
 			default: break;
 			}
@@ -4249,11 +4757,13 @@ public:
 			case ',':
 			case '{':
 			case '[':
-			{ log << warn << "not primitive";
-			if (err) {
-				*err = 1;
-			}
-			return false; } break;
+			{
+				log << warn << "not primitive";
+				if (err) {
+					*err = 1;
+				}
+				return false;
+			} break;
 			}
 		}
 		if (idx < middle) {
@@ -4298,26 +4808,34 @@ public:
 				if (idx >= 0 && buf[simdjson_imple->structural_indexes[idx]] == '{') { --idx; break; } goto scope_end;
 			case ']':
 				if (idx >= 0 && buf[simdjson_imple->structural_indexes[idx]] == '[') { --idx; break; } goto scope_end;
-			case ',': { log << warn << "wrong comma.";
+			case ',': {
+				log << warn << "wrong comma.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case ':': { log << warn << "wrong colon.";
+				return false;
+			}
+			case ':': {
+				log << warn << "wrong colon.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case '{': { log << warn << "wrong {.";
+				return false;
+			}
+			case '{': {
+				log << warn << "wrong {.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case '[': { log << warn << "wrong [.";
+				return false;
+			}
+			case '[': {
+				log << warn << "wrong [.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
+				return false;
+			}
 			default: //SIMDJSON_TRY(visitor.visit_primitive(*this, value)); 
 				break;
 			}
@@ -4382,11 +4900,13 @@ public:
 		switch (buf[simdjson_imple->structural_indexes[idx--]]) {
 		case ',': goto object_value;
 		case '{': goto object_begin;
-		case ':': { log << warn << "wrong colon.";
+		case ':': {
+			log << warn << "wrong colon.";
 			if (err) {
 				*err = 1;
 			}
-			return false; }
+			return false;
+		}
 		default: log << warn << ("No comma between object fields");
 			if (err) {
 				*err = 1;
@@ -4400,7 +4920,7 @@ public:
 			if (is_array.size() < depth) {
 				is_array.push_back(0);
 			}
-		
+
 			if (idx < middle) {
 				goto document_end;
 			}
@@ -4479,26 +4999,34 @@ public:
 			switch (value) {
 			case '}': if (idx >= 0 && buf[simdjson_imple->structural_indexes[idx]] == '{') { --idx; break; } goto scope_end;
 			case ']': if (idx >= 0 && buf[simdjson_imple->structural_indexes[idx]] == '[') { --idx; break; } goto scope_end;
-			case ',': { log << warn << "wrong comma.";
+			case ',': {
+				log << warn << "wrong comma.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case ':': { log << warn << "wrong colon.";
+				return false;
+			}
+			case ':': {
+				log << warn << "wrong colon.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case '{': { log << warn << "wrong {.";
+				return false;
+			}
+			case '{': {
+				log << warn << "wrong {.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
-			case '[': { log << warn << "wrong [.";
+				return false;
+			}
+			case '[': {
+				log << warn << "wrong [.";
 				if (err) {
 					*err = 1;
 				}
-				return false; }
+				return false;
+			}
 			default: break;
 			}
 		}
@@ -4515,11 +5043,13 @@ public:
 		switch (buf[simdjson_imple->structural_indexes[idx--]]) {
 		case ',': goto array_value;
 		case '[': goto array_begin;
-		case ':': { log << warn << "wrong colon.";
+		case ':': {
+			log << warn << "wrong colon.";
 			if (err) {
 				*err = 1;
 			}
-			return false; }
+			return false;
+		}
 		default: log << warn << ("Missing comma between array values");
 			if (err) {
 				*err = 1;
@@ -4911,7 +5441,7 @@ public:
 
 			b = std::chrono::steady_clock::now();
 
-				std::set<uint64_t> _set;
+			std::set<uint64_t> _set;
 			//if (!is_valid(test, length - 1)) {
 			//	return { false, 0 };
 			//}
@@ -4919,11 +5449,11 @@ public:
 			{
 
 				auto a = std::chrono::steady_clock::now();
-								
+
 				//if (use_all_function) 
 				{
 
-				//	std_vector<uint64_t> start(thr_num + 1);
+					//	std_vector<uint64_t> start(thr_num + 1);
 					std_vector<uint64_t> last(thr_num);
 
 					std_vector<int> start_state(thr_num, -1);
@@ -5028,10 +5558,10 @@ public:
 						}
 
 						if (false == is_array[0].empty()) {
-							std::cout << "false ... " << is_array[0].size() << "\n";
+						//	std::cout << "false ... " << is_array[0].size() << "\n";
 							free(count_vec); return { false, -4 };
 						}
-						
+
 						int64_t sum = count_open_[0];
 
 						for (uint64_t i = 1; i < count_open_.size(); ++i) {
@@ -5055,9 +5585,9 @@ public:
 							log << info << "is not valid2\n";
 							return { false, 0 };
 						}
-					
+
 						log << info << "depth max " << count_open_ << "\n";
-						
+
 						if (count_open_ > 1024) {
 							free(count_vec);
 							return { false, -10 };
@@ -5077,8 +5607,8 @@ public:
 			thr_num = _set.size();
 
 			LoadData2 p(pool.get());
-						
-			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec, 
+
+			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec,
 				thr_num, use_lex_string, nullptr)) // 0 : use all thread..
 			{
 				free(count_vec);
@@ -5096,11 +5626,11 @@ public:
 		free(count_vec);
 		return  { true, length };
 	}
-	
 
 
 
-	
+
+
 	/*
 	Object2 ParseObject(Document2* d, Wizard* wiz,  _simdjson::dom::parser_for_claujson* scanner, uint64_t start) {
 		//Object2 obj(d);
@@ -5131,7 +5661,7 @@ public:
 	void Parse(Document2* d, Wizard* wiz, _simdjson::dom::parser_for_claujson* scanner, uint64_t start = 0) {
 		auto* buf = scanner->raw_buf().get();
 		auto* tokens = scanner->raw_implementation()->structural_indexes.get();
-		
+
 		if (buf[tokens[start]] == '{') {
 			//ParseObject(d, wiz, scanner, start + 1);
 		}
@@ -5176,7 +5706,7 @@ public:
 			auto* simdjson_imple_ = test_.raw_implementation().get(); // token array.
 			const auto token_len = simdjson_imple_->n_structural_indexes;
 			const auto* tokens = simdjson_imple_->structural_indexes.get();
-			
+
 
 			Document2* dom = new Document2;
 			Wizard* wiz = new Wizard(dom);
@@ -5187,12 +5717,12 @@ public:
 				d = dom;
 			}
 		}
-		
+
 
 		return { true, length };
 	}
 	*/
-	
+
 	std::pair<bool, uint64_t> parser::parse_str(StringView str, Document& d, uint64_t thr_num, bool use_lex_string)
 	{
 		claujson::clean(d.Get());
@@ -5256,7 +5786,7 @@ public:
 			b = std::chrono::steady_clock::now();
 
 			//if (use_all_function)
-			
+
 			std::set<uint64_t> _set;
 			{
 				//std_vector<uint64_t> start(thr_num + 1);
@@ -5318,20 +5848,20 @@ public:
 
 				for (uint64_t i = 0; i < vec.size(); ++i) {
 					if (vec[i] == false) {
-						free(count_vec); 
+						free(count_vec);
 						return { false, -1 };
 					}
 				}
 
 				for (uint64_t i = 0; i < _set.size() - 1; ++i) {
 					if (start_state[i + 1] != last_state[i]) {
-						free(count_vec); 
+						free(count_vec);
 						return { false, -2 };
 					}
 				}
 
 				if (is_virtual_array[0].empty() == false) { // first block has no virtual array or virtual object.!
-					free(count_vec); 
+					free(count_vec);
 					return { false, -3 };
 				}
 
@@ -5353,7 +5883,7 @@ public:
 							}
 						}
 						else {
-							free(count_vec); 
+							free(count_vec);
 							return { false, -3 };
 						}
 					}
@@ -5361,13 +5891,13 @@ public:
 					for (uint64_t x = 0; x < is_array[i].size(); ++x) {
 						is_array[0].push_back(is_array[i][x]);
 					}
-					
+
 					//is_array[0].insert(is_array[0].end(), is_array[i].begin(), is_array[i].end());
 				}
 
 				if (false == is_array[0].empty()) {
-					free(count_vec); 
-					std::cout << is_array[0].size() << "\n";
+					free(count_vec);
+					//std::cout << is_array[0].size() << "\n";
 					return { false, -4 };
 
 				}
@@ -5397,7 +5927,7 @@ public:
 
 			LoadData2 p(pool.get());
 
-			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec, 
+			if (false == p.parse(ut, buf, buf_len, simdjson_imple_, length, start, count_vec,
 				thr_num, use_lex_string, nullptr)) // 0 : use all thread..
 			{
 				free(count_vec);
@@ -5441,7 +5971,7 @@ public:
 		int ret = LoadData2::Merge(this->ptr, other, other_now);
 
 		this->ptr = *other_now;
-		
+
 		return ret;
 	}
 
@@ -5469,7 +5999,7 @@ public:
 		//log << info << str << "\n";
 
 		if (thr_num <= 0) {
-			thr_num = std::max((int)std::thread::hardware_concurrency() - 2, 1);
+			thr_num = 1; //thr_num = std::max((int)std::thread::hardware_concurrency() - 2, 1);
 		}
 		if (thr_num <= 0) {
 			thr_num = 1;
@@ -5487,12 +6017,12 @@ public:
 				log << warn << "not valid json : remain exist";
 				return { false, -111 };
 			}
-			
+
 			if (str.empty() == false && _str.empty()) {
 				return { true, -1000 };
 			}
 
-			str = _str;	
+			str = _str;
 		}
 
 		AutoStateLocal local = s;
@@ -5503,10 +6033,18 @@ public:
 			//std::cout << StringView(str.data() + str.size() - 16, 16) << "\n";
 //
 			auto x = test_.parse(str.data(), str.length());
-
 			if (x.error() != _simdjson::error_code::SUCCESS) {
-				log << warn << "stage1 error : ";
+				log << warn << "stage1 errorx : ";
 				log << warn << x.error() << "\n";
+
+				return { false, 0 };
+			}
+			auto x_length = test_.raw_implementation().get()->n_structural_indexes;
+			auto y = test_.parse(str.data(), str.length() + s.offset());
+			//std::cout << "parsey " << str.length() << " " << s.offset() << "\n";
+			if (y.error() != _simdjson::error_code::SUCCESS) {
+				log << warn << "stage1 errory : ";
+				log << warn << y.error() << "\n";
 
 				return { false, 0 };
 			}
@@ -5521,9 +6059,12 @@ public:
 			auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(a - _);
 			log << info << dur.count() << "ms\n";
 
-
 			{
 				uint64_t how_many = simdjson_imple_->n_structural_indexes;
+
+				if (s.offset() != 0) {
+					how_many = x_length;
+				}
 				length = how_many;
 
 				start[0] = 0;
@@ -5593,7 +6134,7 @@ public:
 					thr_result[i] = pool->enqueue(is_valid2, std::ref(test_), start[i], last[i], &start_state[i], &last_state[i],
 						&is_array[i], &is_virtual_array[i], s.is_first(), count_vec, &count_open_[i], &count_[i]);
 				}
-				
+
 				std_vector<int> vec(_set.size());
 
 				for (uint64_t i = 0; i < _set.size(); ++i) {
@@ -5615,21 +6156,20 @@ public:
 						return { false, -2 };
 					}
 				}
-				
+
+				/*
 				//chk..
 				if (!s.is_first()) {
-					if (s.next_state == STATE_SCOPE_END && (start_state[0] == STATE_ARRAY_CONT || start_state[0] == STATE_OBJECT_CONT)) {
-						//
-					}
-					else if (s.next_state != start_state[0]) {
+					if (s.next_state != start_state[0]) {
 						free(count_vec);
 						// debug.
 						log << info << s.next_state << " " << start_state[0] << "\n";
 						return { false, -22 };
 					}
 				}
-				s.next_state = last_state.back();
-				
+				s.next_state = last_state[_set.size() - 1];
+				*/
+
 				if (s.is_first()) {
 					if (is_virtual_array[0].empty() == false) { // first block has no virtual array or virtual object.!
 						free(count_vec);
@@ -5638,7 +6178,7 @@ public:
 				}
 
 				if (s.is_first()) {
-					
+
 					for (uint64_t i = 1; i < _set.size(); ++i) {
 						// first block one more [ or { ... ?
 						if (is_array[0].empty()) {
@@ -5671,7 +6211,7 @@ public:
 
 					if (s.is_last() && false == is_array[0].empty()) {
 						free(count_vec);
-						return { false, -4 };
+						return { false, -40 };
 					}
 
 					s.is_array = std::move(is_array[0]);
@@ -5684,7 +6224,7 @@ public:
 							//  
 							if (s.is_array.size() >= is_virtual_array[i].size()) {
 								for (uint64_t j = 0; j < is_virtual_array[i].size(); ++j) {
-									if (s.is_array.back() != is_virtual_array[i][j]) {										
+									if (s.is_array.back() != is_virtual_array[i][j]) {
 										free(count_vec);
 										log << info << i << " " << j << "\n";
 										return { false, -34 };
@@ -5707,12 +6247,12 @@ public:
 					log << info << s.is_array.size() << "test\n";
 
 					if (s.is_last() && false == s.is_array.empty()) {
-					free(count_vec);
-					std::cout << s.is_array.size() << "\n";
-						return { false, -4 };
+						free(count_vec);
+						//std::cout << s.is_array.size() << "\n";
+						return { false, -400 };
 					}
 				}
-				
+
 				/*
 				int64_t sum = 0;
 				sum = std::max(sum, s.depth_base + count_open_[0]);
@@ -5771,9 +6311,9 @@ public:
 	writer::writer(int thr_num) {
 		pool = pool_init(thr_num);
 	}
-		
+
 	std::string writer::write_to_str(const _Value& global, bool pretty) {
-		LoadData2 p(pool.get()); 
+		LoadData2 p(pool.get());
 		return p.write_to_str(global, pretty);
 	}
 
@@ -5788,18 +6328,18 @@ public:
 	}
 
 	void writer::write_parallel(const std::string& fileName, _Value& j, uint64_t thr_num, bool pretty) {
-		LoadData2 p(pool.get()); 
+		LoadData2 p(pool.get());
 		p.write_parallel(fileName, j, thr_num, pretty);
 	}
 	void writer::write_parallel2(const std::string& fileName, const _Value& j, uint64_t thr_num, bool pretty) {
-		LoadData2 p(pool.get()); 
+		LoadData2 p(pool.get());
 		p.write_parallel2(fileName, j, thr_num, pretty);
 	}
 
 	static std::string escape_for_json_pointer(std::string str) {
 		// 1. ~ -> ~0
 		// 2. / -> ~1
-		
+
 		{
 			uint64_t idx = 0;
 			idx = str.find('~');
@@ -5846,11 +6386,11 @@ public:
 		static const _Value _replace_str = _Value("replace"sv);
 		static const _Value _remove_str = _Value("remove"sv);
 		static const _Value _add_str = _Value("add"sv);
-	
+
 
 		if (x.type() != y.type() && (false == x.is_string() || false == y.is_string())) {
 			Object* obj = new (std::nothrow) Object();
-			
+
 			if (obj == nullptr) {
 				clean(result);
 				return _Value(nullptr, false);
@@ -5869,14 +6409,14 @@ public:
 				}
 				obj->add_element(_path_str.clone(), _Value(temp));
 			}
-			
+
 			obj->add_element(_value_str.clone(), _Value(y.clone()));
 
 			j->add_element(_Value(obj));
 			return result;
 		}
 
-	
+
 
 		switch (x.type()) {
 		case _ValueType::ARRAY:
@@ -5986,8 +6526,8 @@ public:
 					uint64_t idx = jy.as_object()->find(key);
 					if (idx != Object::npos) {
 						route.push_back(key.clone());
-						
-						_Value inner_diff = _diff((jx.as_object()->get_value_list(i - 1)), 
+
+						_Value inner_diff = _diff((jx.as_object()->get_value_list(i - 1)),
 							jy.as_object()->get_value_list(idx), route);
 
 						route.pop_back();
@@ -6030,9 +6570,9 @@ public:
 							}
 							obj->add_element(_path_str.clone(), _Value(temp));
 						}
-						
+
 						//obj->add_element(_path_str.clone(), _Value(route));
-						
+
 						obj->add_element(_last_key_str.clone(), key.clone());
 
 						j->add_element(_Value(obj));
@@ -6065,9 +6605,9 @@ public:
 							}
 							obj->add_element(_path_str.clone(), _Value(temp));
 						}
-						
+
 						//obj->add_element(_path_str.clone(), _Value(route));
-						
+
 						obj->add_element(_key_str.clone(), _Value(jy.as_object()->get_key_list(i).clone()));
 						obj->add_element(_value_str.clone(), _Value(jy.as_object()->get_value_list(i).clone()));
 
@@ -6110,7 +6650,7 @@ public:
 			}
 
 			//obj->add_element(_path_str.clone(), _Value(route));
-			
+
 			obj->add_element(_value_str.clone(), _Value(y.clone()));
 
 			j->add_element(_Value(obj));
@@ -6301,7 +6841,7 @@ public:
 
 
 	/*
-	
+
 	bool is_valid_string_in_json(StringView x) {
 		const char* str = x.data();
 		uint64_t len = x.size();
@@ -6495,4 +7035,3 @@ public:
 */
 
 }
-

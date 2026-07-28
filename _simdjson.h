@@ -1,4 +1,4 @@
-﻿/* auto-generated on 2026-03-20 11:11:38 -0400. version 4.4.2 Do not edit! */
+/* auto-generated on 2026-05-06 17:28:39 -0400. version 4.6.4 Do not edit! */
 /* including _simdjson.h:  */
 /* begin file _simdjson.h */
 #ifndef _SIMDJSON_H
@@ -2555,7 +2555,7 @@ namespace std {
 #define _SIMDJSON__SIMDJSON_VERSION_H
 
 /** The version of _simdjson being used (major.minor.revision) */
-#define _SIMDJSON_VERSION "4.4.2"
+#define _SIMDJSON_VERSION "4.6.4"
 
 namespace _simdjson {
 enum {
@@ -2566,11 +2566,11 @@ enum {
   /**
    * The minor version (major.MINOR.revision) of _simdjson being used.
    */
-  _SIMDJSON_VERSION_MINOR = 4,
+  _SIMDJSON_VERSION_MINOR = 6,
   /**
    * The revision (major.minor.REVISION) of _simdjson being used.
    */
-  _SIMDJSON_VERSION_REVISION = 2
+  _SIMDJSON_VERSION_REVISION = 4
 };
 } // namespace _simdjson
 
@@ -3819,6 +3819,12 @@ protected:
    */
   size_t _max_depth{0};
 
+public:
+  /** Whether to store big integers as strings instead of returning BIGINT_ERROR */
+  bool _number_as_string{false};
+
+protected:
+
   // Declaring these so that subclasses can use them to implement their constructors.
   _simdjson_inline dom_parser_implementation() noexcept;
   _simdjson_inline dom_parser_implementation(dom_parser_implementation &&other) noexcept;
@@ -4877,10 +4883,13 @@ inline padded_string::operator padded_string_view() const noexcept _simdjson_lif
 }
 
 inline _simdjson_result<padded_string> padded_string::load(std::string_view filename) noexcept {
+  // std::string_view is not guaranteed to be null-terminated, but std::fopen requires
+  // a null-terminated C string. Construct a temporary std::string to ensure null-termination.
+  const std::string null_terminated_filename(filename);
   // Open the file
   _SIMDJSON_PUSH_DISABLE_WARNINGS
   _SIMDJSON_DISABLE_DEPRECATED_WARNING // Disable CRT_SECURE warning on MSVC: manually verified this is safe
-  std::FILE *fp = std::fopen(filename.data(), "rb");
+  std::FILE *fp = std::fopen(null_terminated_filename.c_str(), "rb");
   _SIMDJSON_POP_DISABLE_WARNINGS
 
   if (fp == nullptr) {
@@ -4932,10 +4941,13 @@ inline _simdjson_result<padded_string> padded_string::load(std::string_view file
 
 #if defined(_WIN32) && _SIMDJSON_CPLUSPLUS17
 inline _simdjson_result<padded_string> padded_string::load(std::wstring_view filename) noexcept {
+  // std::wstring_view is not guaranteed to be null-terminated, but _wfopen requires
+  // a null-terminated wide C string. Construct a temporary std::wstring to ensure null-termination.
+  const std::wstring null_terminated_filename(filename);
   // Open the file using the wide characters
   _SIMDJSON_PUSH_DISABLE_WARNINGS
   _SIMDJSON_DISABLE_DEPRECATED_WARNING // Disable CRT_SECURE warning on MSVC: manually verified this is safe
-  std::FILE *fp = _wfopen(filename.data(), L"rb");
+  std::FILE *fp = _wfopen(null_terminated_filename.c_str(), L"rb");
   _SIMDJSON_POP_DISABLE_WARNINGS
 
   if (fp == nullptr) {
@@ -5058,6 +5070,9 @@ inline padded_string padded_string_builder::convert() noexcept {
 }
 
 inline bool padded_string_builder::reserve(size_t additional) noexcept {
+  if (_simdjson_unlikely(additional + size < size)) {
+    return false; // overflow: cannot satisfy request
+  }
   size_t needed = size + additional;
   if (needed <= capacity) {
     return true;
@@ -5067,8 +5082,9 @@ inline bool padded_string_builder::reserve(size_t additional) noexcept {
   // repeated allocations.
   if (new_capacity < 4096) {
     new_capacity *= 2;
-  } else {
-    new_capacity += new_capacity/2; // grow by 1.5x
+    // overflow guard: ensure new_capacity + new_capacity/2 does not overflow
+  } else if (new_capacity + new_capacity / 2 > new_capacity) {
+    new_capacity += new_capacity / 2; // grow by 1.5x
   }
   char *new_data = internal::allocate_padded_buffer(new_capacity);
   if (new_data == nullptr) {
@@ -6201,6 +6217,13 @@ public:
   inline bool dump_raw_tape(std::ostream &os) const noexcept;
 
 
+  /**
+   * When enabled, big integers (exceeding uint64 range) are stored as strings
+   * in the tape instead of returning BIGINT_ERROR. Default: false.
+   */
+  inline void number_as_string(bool enabled) noexcept { _number_as_string = enabled; }
+  inline bool number_as_string() const noexcept { return _number_as_string; }
+
 protected:
   /**
    * The maximum document length this parser will automatically support.
@@ -6208,6 +6231,9 @@ protected:
    * The parser will not be automatically allocated above this amount.
    */
   size_t _max_capacity;
+
+  /** Whether to store big integers as strings instead of returning BIGINT_ERROR */
+  bool _number_as_string{false};
 
   /**
    * The loaded buffer (reused each time load() is called)
@@ -6623,7 +6649,8 @@ enum class element_type {
   DOUBLE = 'd',    ///< double: Any number with a "." or "e" that fits in double.
   STRING = '"',    ///< std::string_view
   BOOL = 't',      ///< bool
-  NULL_VALUE = 'n' ///< null
+  NULL_VALUE = 'n', ///< null
+  BIGINT = 'Z'     ///< std::string_view: big integer stored as raw digit string
 };
 
 /**
@@ -6723,6 +6750,14 @@ public:
   inline _simdjson_result<bool> get_bool() const noexcept;
 
   /**
+   * Read this element as a big integer (raw digit string).
+   *
+   * @returns A string_view of the raw digits, or:
+   *          INCORRECT_TYPE if the JSON element is not a big integer.
+   */
+  inline _simdjson_result<std::string_view> get_bigint() const noexcept;
+
+  /**
    * Whether this element is a json array.
    *
    * Equivalent to is<array>().
@@ -6776,6 +6811,11 @@ public:
    * Whether this element is a json `null`.
    */
   inline bool is_null() const noexcept;
+
+  /**
+   * Whether this element is a big integer (number exceeding 64-bit range).
+   */
+  inline bool is_bigint() const noexcept;
 
   /**
    * Tell whether the value can be cast to provided type (T).
@@ -7135,6 +7175,7 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64() const noexcept;
   _simdjson_inline _simdjson_result<double> get_double() const noexcept;
   _simdjson_inline _simdjson_result<bool> get_bool() const noexcept;
+  _simdjson_inline _simdjson_result<std::string_view> get_bigint() const noexcept;
 
   _simdjson_inline bool is_array() const noexcept;
   _simdjson_inline bool is_object() const noexcept;
@@ -7145,6 +7186,7 @@ public:
   _simdjson_inline bool is_number() const noexcept;
   _simdjson_inline bool is_bool() const noexcept;
   _simdjson_inline bool is_null() const noexcept;
+  _simdjson_inline bool is_bigint() const noexcept;
 
   _simdjson_inline _simdjson_result<dom::element> operator[](std::string_view key) const noexcept;
   _simdjson_inline _simdjson_result<dom::element> operator[](const char *key) const noexcept;
@@ -8136,6 +8178,7 @@ enum class tape_type {
   TRUE_VALUE = 't',
   FALSE_VALUE = 'f',
   NULL_VALUE = 'n',
+  BIGINT = 'Z',
   COMMA = ',',
   COLON = ':',
   NONE
@@ -9012,6 +9055,10 @@ _simdjson_inline _simdjson_result<bool> _simdjson_result<dom::element>::get_bool
   if (error()) { return error(); }
   return first.get_bool();
 }
+_simdjson_inline _simdjson_result<std::string_view> _simdjson_result<dom::element>::get_bigint() const noexcept {
+  if (error()) { return error(); }
+  return first.get_bigint();
+}
 
 _simdjson_inline bool _simdjson_result<dom::element>::is_array() const noexcept {
   return !error() && first.is_array();
@@ -9040,6 +9087,9 @@ _simdjson_inline bool _simdjson_result<dom::element>::is_bool() const noexcept {
 
 _simdjson_inline bool _simdjson_result<dom::element>::is_null() const noexcept {
   return !error() && first.is_null();
+}
+_simdjson_inline bool _simdjson_result<dom::element>::is_bigint() const noexcept {
+  return !error() && first.is_bigint();
 }
 
 _simdjson_inline _simdjson_result<dom::element> _simdjson_result<dom::element>::operator[](std::string_view key) const noexcept {
@@ -9148,6 +9198,15 @@ inline _simdjson_result<bool> element::get_bool() const noexcept {
     return false;
   }
   return INCORRECT_TYPE;
+}
+inline _simdjson_result<std::string_view> element::get_bigint() const noexcept {
+  _SIMDJSON_DEVELOPMENT_ASSERT(tape.usable());
+  switch (tape.tape_ref_type()) {
+    case internal::tape_type::BIGINT:
+      return tape.get_string_view();
+    default:
+      return INCORRECT_TYPE;
+  }
 }
 inline _simdjson_result<const char *> element::get_c_str() const noexcept {
   _SIMDJSON_DEVELOPMENT_ASSERT(tape.usable()); // https://github.com/_simdjson/_simdjson/issues/1914
@@ -9291,6 +9350,10 @@ inline bool element::is_null() const noexcept {
   return tape.is_null_on_tape();
 }
 
+inline bool element::is_bigint() const noexcept {
+  return tape.tape_ref_type() == internal::tape_type::BIGINT;
+}
+
 #if _SIMDJSON_EXCEPTIONS
 
 inline element::operator bool() const noexcept(false) { return get<bool>(); }
@@ -9423,6 +9486,8 @@ inline std::ostream& operator<<(std::ostream& out, element_type type) {
       return out << "bool";
     case element_type::NULL_VALUE:
       return out << "null";
+    case element_type::BIGINT:
+      return out << "bigint";
     default:
       return out << "unexpected content!!!"; // abort() usage is forbidden in the library
   }
@@ -9494,10 +9559,11 @@ inline bool parser::dump_raw_tape(std::ostream &os) const noexcept {
 }
 
 inline _simdjson_result<size_t> parser::read_file(std::string_view path) noexcept {
+  const std::string path_copy(path);
   // Open the file
   _SIMDJSON_PUSH_DISABLE_WARNINGS
   _SIMDJSON_DISABLE_DEPRECATED_WARNING // Disable CRT_SECURE warning on MSVC: manually verified this is safe
-  std::FILE *fp = std::fopen(path.data(), "rb");
+  std::FILE *fp = std::fopen(path_copy.c_str(), "rb");
   _SIMDJSON_POP_DISABLE_WARNINGS
 
   if (fp == nullptr) {
@@ -9617,6 +9683,7 @@ inline _simdjson_result<element> parser::parse_into_document(document& provided_
     buf += 3;
     len -= 3;
   }
+  implementation->_number_as_string = _number_as_string;
   _error = implementation->parse(buf, len, provided_doc);
 
   if (_error) { return _error; }
@@ -10320,6 +10387,15 @@ inline bool document::dump_raw_tape(std::ostream &os) const noexcept {
     case 'r': // we start and end with the root node
       // should we be hitting the root node?
       return false;
+    case 'Z': // we have a big integer
+      os << "bigint ";
+      std::memcpy(&string_length, string_buf.get() + payload, sizeof(uint32_t));
+      os << std::string_view(
+        reinterpret_cast<const char *>(string_buf.get() + payload + sizeof(uint32_t)),
+        string_length
+      );
+      os << '\n';
+      break;
     default:
       return false;
     }
@@ -10805,6 +10881,12 @@ inline void string_builder<serializer>::append(_simdjson::dom::element value) {
     case tape_type::STRING:
       format.string(iter.get_string_view());
       break;
+    case tape_type::BIGINT: {
+      // Big integer stored as string — output raw digits (no quotes)
+      auto sv = iter.get_string_view();
+      format.chars(sv.data(), sv.data() + sv.size());
+      break;
+    }
     case tape_type::INT64:
       format.number(iter.next_tape_value<int64_t>());
       iter.json_index++; // numbers take up 2 spots, so we need to increment
@@ -39976,6 +40058,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for arm64 */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -40731,6 +40814,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -40739,6 +40827,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -42060,6 +42153,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for fallback */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -42819,6 +42913,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -42827,6 +42926,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -44635,6 +44739,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for haswell */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -45390,6 +45495,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -45398,6 +45508,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -47206,6 +47321,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for icelake */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -47961,6 +48077,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -47969,6 +48090,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -49892,6 +50018,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for ppc64 */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -50647,6 +50774,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -50655,6 +50787,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -52895,6 +53032,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for westmere */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -53650,6 +53788,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -53658,6 +53801,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -55372,6 +55520,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for lsx */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -56127,6 +56276,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -56135,6 +56289,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -57872,6 +58031,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for lasx */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -58627,6 +58787,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -58635,6 +58800,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -60376,6 +60546,7 @@ _simdjson_warn_unused _simdjson_result<std::string> extract_fractured_json(
 /* begin file _simdjson/generic/builder/json_string_builder-inl.h for rvv_vls */
 #include <array>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifndef _SIMDJSON_GENERIC_STRING_BUILDER_INL_H
 
@@ -61131,6 +61302,11 @@ _simdjson_inline void string_builder::append(number_type v) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the multiplication below.
+  if (input.size() > (std::numeric_limits<size_t>::max)() / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(6 * input.size())) {
     position += write_string_escaped(input, buffer.get() + position);
   }
@@ -61139,6 +61315,11 @@ string_builder::escape_and_append(std::string_view input) noexcept {
 _simdjson_inline void
 string_builder::escape_and_append_with_quotes(std::string_view input) noexcept {
   // escaping might turn a control character into \x00xx so 6 characters.
+  // Guard against size_t overflow in the arithmetic below.
+  if (input.size() > ((std::numeric_limits<size_t>::max)() - 2) / 6) {
+    set_valid(false);
+    return;
+  }
   if (capacity_check(2 + 6 * input.size())) {
     buffer.get()[position++] = '"';
     position += write_string_escaped(input, buffer.get() + position);
@@ -63162,6 +63343,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -63676,13 +63879,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -63746,6 +63957,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -63873,8 +64086,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, arm64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<arm64::ondemand::value>::get<arm64::ondemand::value>(
+    arm64::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<arm64::ondemand::value>
+_simdjson_result<arm64::ondemand::value>::get<arm64::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -65214,8 +65441,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -65378,13 +65603,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -65508,7 +65741,13 @@ public:
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, arm64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -65740,6 +65979,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -66388,21 +66647,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -66493,6 +66755,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -66621,7 +66885,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -66646,6 +66916,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -66705,7 +66977,13 @@ public:
 
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, arm64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -66733,6 +67011,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -66788,7 +67068,13 @@ public:
 
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, arm64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -67441,13 +67727,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -67597,7 +67891,13 @@ public:
   _simdjson_inline _simdjson_result<arm64::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<arm64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, arm64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -68611,46 +68911,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -68658,16 +68946,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -68730,9 +69015,15 @@ _simdjson_inline  _simdjson_result<arm64::ondemand::value> _simdjson_result<arm6
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> _simdjson_result<arm64::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, arm64::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<arm64::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<arm64::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -68851,6 +69142,8 @@ _simdjson_inline bool _simdjson_result<arm64::ondemand::array_iterator>::at_end(
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace arm64 {
 namespace ondemand {
@@ -68911,6 +69204,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -68926,6 +69231,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -68937,6 +69244,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -69135,14 +69444,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -69239,6 +69554,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<arm64::ondemand::val
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<arm64::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<arm64::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<arm64::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<arm64::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -69398,12 +69721,18 @@ _simdjson_inline _simdjson_result<arm64::ondemand::value> _simdjson_result<arm64
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<arm64::ondemand::value>> _simdjson_result<arm64::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, arm64::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<arm64::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -69429,6 +69758,8 @@ inline _simdjson_result<std::vector<arm64::ondemand::value>> _simdjson_result<ar
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace arm64 {
@@ -69545,6 +69876,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -69578,6 +69921,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -69588,6 +69933,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -69761,8 +70108,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -69770,9 +70123,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -69917,6 +70270,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<arm64::ondemand::doc
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<arm64::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<arm64::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<arm64::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<arm64::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -70101,9 +70462,15 @@ _simdjson_inline _simdjson_result<arm64::ondemand::value> _simdjson_result<arm64
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> _simdjson_result<arm64::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, arm64::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<arm64::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -70145,6 +70512,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -70162,6 +70541,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -70200,7 +70581,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -70292,6 +70679,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<arm64::ondemand::doc
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<arm64::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<arm64::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<arm64::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<arm64::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -70457,11 +70852,17 @@ _simdjson_inline _simdjson_result<arm64::ondemand::value> _simdjson_result<arm64
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> _simdjson_result<arm64::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, arm64::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<arm64::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -72039,9 +72440,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -72051,34 +72456,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -72209,9 +72602,15 @@ _simdjson_inline _simdjson_result<arm64::ondemand::value> _simdjson_result<arm64
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<arm64::ondemand::value>> _simdjson_result<arm64::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, arm64::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<arm64::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<arm64::ondemand::object>::reset() noexcept {
@@ -72565,7 +72964,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -72592,7 +72991,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();
@@ -76314,6 +76713,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -76828,13 +77249,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -76898,6 +77327,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -77025,8 +77456,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, fallback::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<fallback::ondemand::value>::get<fallback::ondemand::value>(
+    fallback::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<fallback::ondemand::value>
+_simdjson_result<fallback::ondemand::value>::get<fallback::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -78366,8 +78811,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -78530,13 +78973,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -78660,7 +79111,13 @@ public:
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, fallback::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -78892,6 +79349,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -79540,21 +80017,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -79645,6 +80125,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -79773,7 +80255,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -79798,6 +80286,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -79857,7 +80347,13 @@ public:
 
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, fallback::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -79885,6 +80381,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -79940,7 +80438,13 @@ public:
 
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, fallback::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -80593,13 +81097,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -80749,7 +81261,13 @@ public:
   _simdjson_inline _simdjson_result<fallback::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<fallback::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, fallback::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -81763,46 +82281,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -81810,16 +82316,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -81882,9 +82385,15 @@ _simdjson_inline  _simdjson_result<fallback::ondemand::value> _simdjson_result<f
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> _simdjson_result<fallback::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, fallback::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<fallback::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<fallback::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -82003,6 +82512,8 @@ _simdjson_inline bool _simdjson_result<fallback::ondemand::array_iterator>::at_e
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace fallback {
 namespace ondemand {
@@ -82063,6 +82574,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -82078,6 +82601,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -82089,6 +82614,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -82287,14 +82814,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -82391,6 +82924,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<fallback::ondemand::
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<fallback::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<fallback::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<fallback::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<fallback::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -82550,12 +83091,18 @@ _simdjson_inline _simdjson_result<fallback::ondemand::value> _simdjson_result<fa
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<fallback::ondemand::value>> _simdjson_result<fallback::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, fallback::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<fallback::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -82581,6 +83128,8 @@ inline _simdjson_result<std::vector<fallback::ondemand::value>> _simdjson_result
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace fallback {
@@ -82697,6 +83246,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -82730,6 +83291,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -82740,6 +83303,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -82913,8 +83478,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -82922,9 +83493,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -83069,6 +83640,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<fallback::ondemand::
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<fallback::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<fallback::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<fallback::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<fallback::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -83253,9 +83832,15 @@ _simdjson_inline _simdjson_result<fallback::ondemand::value> _simdjson_result<fa
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> _simdjson_result<fallback::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, fallback::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<fallback::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -83297,6 +83882,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -83314,6 +83911,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -83352,7 +83951,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -83444,6 +84049,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<fallback::ondemand::
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<fallback::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<fallback::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<fallback::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<fallback::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -83609,11 +84222,17 @@ _simdjson_inline _simdjson_result<fallback::ondemand::value> _simdjson_result<fa
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> _simdjson_result<fallback::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, fallback::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<fallback::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -85191,9 +85810,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -85203,34 +85826,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -85361,9 +85972,15 @@ _simdjson_inline _simdjson_result<fallback::ondemand::value> _simdjson_result<fa
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<fallback::ondemand::value>> _simdjson_result<fallback::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, fallback::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<fallback::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<fallback::ondemand::object>::reset() noexcept {
@@ -85717,7 +86334,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -85744,7 +86361,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();
@@ -89953,6 +90570,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -90467,13 +91106,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -90537,6 +91184,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -90664,8 +91313,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, haswell::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<haswell::ondemand::value>::get<haswell::ondemand::value>(
+    haswell::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<haswell::ondemand::value>
+_simdjson_result<haswell::ondemand::value>::get<haswell::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -92005,8 +92668,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -92169,13 +92830,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -92299,7 +92968,13 @@ public:
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, haswell::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -92531,6 +93206,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -93179,21 +93874,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -93284,6 +93982,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -93412,7 +94112,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -93437,6 +94143,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -93496,7 +94204,13 @@ public:
 
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, haswell::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -93524,6 +94238,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -93579,7 +94295,13 @@ public:
 
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, haswell::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -94232,13 +94954,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -94388,7 +95118,13 @@ public:
   _simdjson_inline _simdjson_result<haswell::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<haswell::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, haswell::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -95402,46 +96138,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -95449,16 +96173,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -95521,9 +96242,15 @@ _simdjson_inline  _simdjson_result<haswell::ondemand::value> _simdjson_result<ha
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> _simdjson_result<haswell::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, haswell::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<haswell::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<haswell::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -95642,6 +96369,8 @@ _simdjson_inline bool _simdjson_result<haswell::ondemand::array_iterator>::at_en
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace haswell {
 namespace ondemand {
@@ -95702,6 +96431,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -95717,6 +96458,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -95728,6 +96471,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -95926,14 +96671,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -96030,6 +96781,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<haswell::ondemand::v
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<haswell::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<haswell::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<haswell::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<haswell::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -96189,12 +96948,18 @@ _simdjson_inline _simdjson_result<haswell::ondemand::value> _simdjson_result<has
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<haswell::ondemand::value>> _simdjson_result<haswell::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, haswell::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<haswell::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -96220,6 +96985,8 @@ inline _simdjson_result<std::vector<haswell::ondemand::value>> _simdjson_result<
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace haswell {
@@ -96336,6 +97103,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -96369,6 +97148,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -96379,6 +97160,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -96552,8 +97335,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -96561,9 +97350,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -96708,6 +97497,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<haswell::ondemand::d
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<haswell::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<haswell::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<haswell::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<haswell::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -96892,9 +97689,15 @@ _simdjson_inline _simdjson_result<haswell::ondemand::value> _simdjson_result<has
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> _simdjson_result<haswell::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, haswell::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<haswell::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -96936,6 +97739,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -96953,6 +97768,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -96991,7 +97808,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -97083,6 +97906,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<haswell::ondemand::d
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<haswell::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<haswell::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<haswell::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<haswell::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -97248,11 +98079,17 @@ _simdjson_inline _simdjson_result<haswell::ondemand::value> _simdjson_result<has
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> _simdjson_result<haswell::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, haswell::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<haswell::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -98830,9 +99667,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -98842,34 +99683,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -99000,9 +99829,15 @@ _simdjson_inline _simdjson_result<haswell::ondemand::value> _simdjson_result<has
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<haswell::ondemand::value>> _simdjson_result<haswell::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, haswell::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<haswell::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<haswell::ondemand::object>::reset() noexcept {
@@ -99356,7 +100191,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -99383,7 +100218,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();
@@ -103592,6 +104427,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -104106,13 +104963,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -104176,6 +105041,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -104303,8 +105170,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, icelake::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<icelake::ondemand::value>::get<icelake::ondemand::value>(
+    icelake::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<icelake::ondemand::value>
+_simdjson_result<icelake::ondemand::value>::get<icelake::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -105644,8 +106525,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -105808,13 +106687,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -105938,7 +106825,13 @@ public:
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, icelake::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -106170,6 +107063,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -106818,21 +107731,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -106923,6 +107839,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -107051,7 +107969,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -107076,6 +108000,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -107135,7 +108061,13 @@ public:
 
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, icelake::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -107163,6 +108095,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -107218,7 +108152,13 @@ public:
 
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, icelake::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -107871,13 +108811,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -108027,7 +108975,13 @@ public:
   _simdjson_inline _simdjson_result<icelake::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<icelake::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, icelake::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -109041,46 +109995,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -109088,16 +110030,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -109160,9 +110099,15 @@ _simdjson_inline  _simdjson_result<icelake::ondemand::value> _simdjson_result<ic
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> _simdjson_result<icelake::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, icelake::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<icelake::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<icelake::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -109281,6 +110226,8 @@ _simdjson_inline bool _simdjson_result<icelake::ondemand::array_iterator>::at_en
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace icelake {
 namespace ondemand {
@@ -109341,6 +110288,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -109356,6 +110315,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -109367,6 +110328,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -109565,14 +110528,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -109669,6 +110638,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<icelake::ondemand::v
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<icelake::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<icelake::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<icelake::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<icelake::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -109828,12 +110805,18 @@ _simdjson_inline _simdjson_result<icelake::ondemand::value> _simdjson_result<ice
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<icelake::ondemand::value>> _simdjson_result<icelake::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, icelake::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<icelake::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -109859,6 +110842,8 @@ inline _simdjson_result<std::vector<icelake::ondemand::value>> _simdjson_result<
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace icelake {
@@ -109975,6 +110960,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -110008,6 +111005,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -110018,6 +111017,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -110191,8 +111192,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -110200,9 +111207,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -110347,6 +111354,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<icelake::ondemand::d
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<icelake::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<icelake::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<icelake::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<icelake::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -110531,9 +111546,15 @@ _simdjson_inline _simdjson_result<icelake::ondemand::value> _simdjson_result<ice
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> _simdjson_result<icelake::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, icelake::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<icelake::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -110575,6 +111596,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -110592,6 +111625,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -110630,7 +111665,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -110722,6 +111763,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<icelake::ondemand::d
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<icelake::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<icelake::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<icelake::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<icelake::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -110887,11 +111936,17 @@ _simdjson_inline _simdjson_result<icelake::ondemand::value> _simdjson_result<ice
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> _simdjson_result<icelake::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, icelake::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<icelake::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -112469,9 +113524,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -112481,34 +113540,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -112639,9 +113686,15 @@ _simdjson_inline _simdjson_result<icelake::ondemand::value> _simdjson_result<ice
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<icelake::ondemand::value>> _simdjson_result<icelake::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, icelake::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<icelake::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<icelake::ondemand::object>::reset() noexcept {
@@ -112995,7 +114048,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -113022,7 +114075,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();
@@ -117346,6 +118399,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -117860,13 +118935,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -117930,6 +119013,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -118057,8 +119142,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, ppc64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<ppc64::ondemand::value>::get<ppc64::ondemand::value>(
+    ppc64::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<ppc64::ondemand::value>
+_simdjson_result<ppc64::ondemand::value>::get<ppc64::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -119398,8 +120497,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -119562,13 +120659,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -119692,7 +120797,13 @@ public:
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, ppc64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -119924,6 +121035,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -120572,21 +121703,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -120677,6 +121811,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -120805,7 +121941,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -120830,6 +121972,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -120889,7 +122033,13 @@ public:
 
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, ppc64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -120917,6 +122067,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -120972,7 +122124,13 @@ public:
 
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, ppc64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -121625,13 +122783,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -121781,7 +122947,13 @@ public:
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<ppc64::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, ppc64::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -122795,46 +123967,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -122842,16 +124002,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -122914,9 +124071,15 @@ _simdjson_inline  _simdjson_result<ppc64::ondemand::value> _simdjson_result<ppc6
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> _simdjson_result<ppc64::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, ppc64::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<ppc64::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<ppc64::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -123035,6 +124198,8 @@ _simdjson_inline bool _simdjson_result<ppc64::ondemand::array_iterator>::at_end(
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace ppc64 {
 namespace ondemand {
@@ -123095,6 +124260,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -123110,6 +124287,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -123121,6 +124300,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -123319,14 +124500,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -123423,6 +124610,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<ppc64::ondemand::val
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<ppc64::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<ppc64::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<ppc64::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<ppc64::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -123582,12 +124777,18 @@ _simdjson_inline _simdjson_result<ppc64::ondemand::value> _simdjson_result<ppc64
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<ppc64::ondemand::value>> _simdjson_result<ppc64::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, ppc64::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<ppc64::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -123613,6 +124814,8 @@ inline _simdjson_result<std::vector<ppc64::ondemand::value>> _simdjson_result<pp
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace ppc64 {
@@ -123729,6 +124932,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -123762,6 +124977,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -123772,6 +124989,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -123945,8 +125164,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -123954,9 +125179,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -124101,6 +125326,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<ppc64::ondemand::doc
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<ppc64::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<ppc64::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<ppc64::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<ppc64::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -124285,9 +125518,15 @@ _simdjson_inline _simdjson_result<ppc64::ondemand::value> _simdjson_result<ppc64
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> _simdjson_result<ppc64::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, ppc64::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<ppc64::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -124329,6 +125568,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -124346,6 +125597,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -124384,7 +125637,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -124476,6 +125735,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<ppc64::ondemand::doc
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<ppc64::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<ppc64::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<ppc64::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<ppc64::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -124641,11 +125908,17 @@ _simdjson_inline _simdjson_result<ppc64::ondemand::value> _simdjson_result<ppc64
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> _simdjson_result<ppc64::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, ppc64::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<ppc64::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -126223,9 +127496,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -126235,34 +127512,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -126393,9 +127658,15 @@ _simdjson_inline _simdjson_result<ppc64::ondemand::value> _simdjson_result<ppc64
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<ppc64::ondemand::value>> _simdjson_result<ppc64::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, ppc64::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<ppc64::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<ppc64::ondemand::object>::reset() noexcept {
@@ -126749,7 +128020,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -126776,7 +128047,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();
@@ -131417,6 +132688,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -131931,13 +133224,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -132001,6 +133302,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -132128,8 +133431,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, westmere::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<westmere::ondemand::value>::get<westmere::ondemand::value>(
+    westmere::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<westmere::ondemand::value>
+_simdjson_result<westmere::ondemand::value>::get<westmere::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -133469,8 +134786,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -133633,13 +134948,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -133763,7 +135086,13 @@ public:
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, westmere::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -133995,6 +135324,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -134643,21 +135992,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -134748,6 +136100,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -134876,7 +136230,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -134901,6 +136261,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -134960,7 +136322,13 @@ public:
 
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, westmere::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -134988,6 +136356,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -135043,7 +136413,13 @@ public:
 
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, westmere::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -135696,13 +137072,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -135852,7 +137236,13 @@ public:
   _simdjson_inline _simdjson_result<westmere::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<westmere::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, westmere::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -136866,46 +138256,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -136913,16 +138291,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -136985,9 +138360,15 @@ _simdjson_inline  _simdjson_result<westmere::ondemand::value> _simdjson_result<w
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> _simdjson_result<westmere::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, westmere::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<westmere::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<westmere::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -137106,6 +138487,8 @@ _simdjson_inline bool _simdjson_result<westmere::ondemand::array_iterator>::at_e
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace westmere {
 namespace ondemand {
@@ -137166,6 +138549,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -137181,6 +138576,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -137192,6 +138589,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -137390,14 +138789,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -137494,6 +138899,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<westmere::ondemand::
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<westmere::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<westmere::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<westmere::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<westmere::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -137653,12 +139066,18 @@ _simdjson_inline _simdjson_result<westmere::ondemand::value> _simdjson_result<we
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<westmere::ondemand::value>> _simdjson_result<westmere::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, westmere::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<westmere::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -137684,6 +139103,8 @@ inline _simdjson_result<std::vector<westmere::ondemand::value>> _simdjson_result
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace westmere {
@@ -137800,6 +139221,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -137833,6 +139266,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -137843,6 +139278,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -138016,8 +139453,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -138025,9 +139468,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -138172,6 +139615,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<westmere::ondemand::
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<westmere::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<westmere::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<westmere::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<westmere::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -138356,9 +139807,15 @@ _simdjson_inline _simdjson_result<westmere::ondemand::value> _simdjson_result<we
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> _simdjson_result<westmere::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, westmere::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<westmere::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -138400,6 +139857,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -138417,6 +139886,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -138455,7 +139926,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -138547,6 +140024,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<westmere::ondemand::
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<westmere::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<westmere::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<westmere::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<westmere::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -138712,11 +140197,17 @@ _simdjson_inline _simdjson_result<westmere::ondemand::value> _simdjson_result<we
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> _simdjson_result<westmere::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, westmere::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<westmere::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -140294,9 +141785,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -140306,34 +141801,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -140464,9 +141947,15 @@ _simdjson_inline _simdjson_result<westmere::ondemand::value> _simdjson_result<we
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<westmere::ondemand::value>> _simdjson_result<westmere::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, westmere::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<westmere::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<westmere::ondemand::object>::reset() noexcept {
@@ -140820,7 +142309,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -140847,7 +142336,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();
@@ -144962,6 +146451,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -145476,13 +146987,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -145546,6 +147065,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -145673,8 +147194,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lsx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<lsx::ondemand::value>::get<lsx::ondemand::value>(
+    lsx::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<lsx::ondemand::value>
+_simdjson_result<lsx::ondemand::value>::get<lsx::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -147014,8 +148549,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -147178,13 +148711,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -147308,7 +148849,13 @@ public:
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lsx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -147540,6 +149087,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -148188,21 +149755,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -148293,6 +149863,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -148421,7 +149993,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -148446,6 +150024,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -148505,7 +150085,13 @@ public:
 
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lsx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -148533,6 +150119,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -148588,7 +150176,13 @@ public:
 
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lsx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -149241,13 +150835,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -149397,7 +150999,13 @@ public:
   _simdjson_inline _simdjson_result<lsx::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lsx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lsx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -150411,46 +152019,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -150458,16 +152054,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -150530,9 +152123,15 @@ _simdjson_inline  _simdjson_result<lsx::ondemand::value> _simdjson_result<lsx::o
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> _simdjson_result<lsx::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lsx::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<lsx::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<lsx::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -150651,6 +152250,8 @@ _simdjson_inline bool _simdjson_result<lsx::ondemand::array_iterator>::at_end() 
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace lsx {
 namespace ondemand {
@@ -150711,6 +152312,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -150726,6 +152339,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -150737,6 +152352,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -150935,14 +152552,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -151039,6 +152662,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lsx::ondemand::value
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lsx::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<lsx::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<lsx::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<lsx::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -151198,12 +152829,18 @@ _simdjson_inline _simdjson_result<lsx::ondemand::value> _simdjson_result<lsx::on
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<lsx::ondemand::value>> _simdjson_result<lsx::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lsx::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<lsx::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -151229,6 +152866,8 @@ inline _simdjson_result<std::vector<lsx::ondemand::value>> _simdjson_result<lsx:
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace lsx {
@@ -151345,6 +152984,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -151378,6 +153029,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -151388,6 +153041,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -151561,8 +153216,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -151570,9 +153231,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -151717,6 +153378,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lsx::ondemand::docum
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lsx::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<lsx::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<lsx::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<lsx::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -151901,9 +153570,15 @@ _simdjson_inline _simdjson_result<lsx::ondemand::value> _simdjson_result<lsx::on
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> _simdjson_result<lsx::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lsx::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<lsx::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -151945,6 +153620,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -151962,6 +153649,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -152000,7 +153689,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -152092,6 +153787,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lsx::ondemand::docum
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lsx::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<lsx::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<lsx::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<lsx::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -152257,11 +153960,17 @@ _simdjson_inline _simdjson_result<lsx::ondemand::value> _simdjson_result<lsx::on
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> _simdjson_result<lsx::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lsx::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<lsx::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -153839,9 +155548,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -153851,34 +155564,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -154009,9 +155710,15 @@ _simdjson_inline _simdjson_result<lsx::ondemand::value> _simdjson_result<lsx::on
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<lsx::ondemand::value>> _simdjson_result<lsx::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lsx::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<lsx::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<lsx::ondemand::object>::reset() noexcept {
@@ -154365,7 +156072,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -154392,7 +156099,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();
@@ -158530,6 +160237,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -159044,13 +160773,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -159114,6 +160851,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -159241,8 +160980,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lasx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<lasx::ondemand::value>::get<lasx::ondemand::value>(
+    lasx::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<lasx::ondemand::value>
+_simdjson_result<lasx::ondemand::value>::get<lasx::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -160582,8 +162335,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -160746,13 +162497,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -160876,7 +162635,13 @@ public:
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lasx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -161108,6 +162873,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -161756,21 +163541,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -161861,6 +163649,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -161989,7 +163779,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -162014,6 +163810,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -162073,7 +163871,13 @@ public:
 
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lasx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -162101,6 +163905,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -162156,7 +163962,13 @@ public:
 
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lasx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -162809,13 +164621,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -162965,7 +164785,13 @@ public:
   _simdjson_inline _simdjson_result<lasx::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<lasx::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, lasx::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -163979,46 +165805,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -164026,16 +165840,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -164098,9 +165909,15 @@ _simdjson_inline  _simdjson_result<lasx::ondemand::value> _simdjson_result<lasx:
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> _simdjson_result<lasx::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lasx::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<lasx::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<lasx::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -164219,6 +166036,8 @@ _simdjson_inline bool _simdjson_result<lasx::ondemand::array_iterator>::at_end()
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace lasx {
 namespace ondemand {
@@ -164279,6 +166098,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -164294,6 +166125,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -164305,6 +166138,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -164503,14 +166338,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -164607,6 +166448,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lasx::ondemand::valu
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lasx::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<lasx::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<lasx::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<lasx::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -164766,12 +166615,18 @@ _simdjson_inline _simdjson_result<lasx::ondemand::value> _simdjson_result<lasx::
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<lasx::ondemand::value>> _simdjson_result<lasx::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lasx::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<lasx::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -164797,6 +166652,8 @@ inline _simdjson_result<std::vector<lasx::ondemand::value>> _simdjson_result<las
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace lasx {
@@ -164913,6 +166770,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -164946,6 +166815,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -164956,6 +166827,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -165129,8 +167002,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -165138,9 +167017,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -165285,6 +167164,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lasx::ondemand::docu
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lasx::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<lasx::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<lasx::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<lasx::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -165469,9 +167356,15 @@ _simdjson_inline _simdjson_result<lasx::ondemand::value> _simdjson_result<lasx::
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> _simdjson_result<lasx::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lasx::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<lasx::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -165513,6 +167406,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -165530,6 +167435,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -165568,7 +167475,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -165660,6 +167573,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lasx::ondemand::docu
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<lasx::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<lasx::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<lasx::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<lasx::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -165825,11 +167746,17 @@ _simdjson_inline _simdjson_result<lasx::ondemand::value> _simdjson_result<lasx::
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> _simdjson_result<lasx::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lasx::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<lasx::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -167407,9 +169334,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -167419,34 +169350,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -167577,9 +169496,15 @@ _simdjson_inline _simdjson_result<lasx::ondemand::value> _simdjson_result<lasx::
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<lasx::ondemand::value>> _simdjson_result<lasx::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, lasx::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<lasx::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<lasx::ondemand::object>::reset() noexcept {
@@ -167933,7 +169858,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -167960,7 +169885,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();
@@ -172102,6 +174027,28 @@ public:
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
 
   /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
+
+  /**
    * Cast this JSON value to a double.
    *
    * @returns A double.
@@ -172616,13 +174563,21 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view at_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard character (*) for arrays or ".*" for objects.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 protected:
   /**
@@ -172686,6 +174641,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -172813,8 +174770,22 @@ public:
   _simdjson_inline _simdjson_result<int32_t> current_depth() const noexcept;
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 };
+
+// Forward-declare explicit specializations so MSVC /permissive- sees them before
+// any template instantiation that would resolve element.get(val) to the primary.
+template<> _simdjson_inline error_code
+_simdjson_result<rvv_vls::ondemand::value>::get<rvv_vls::ondemand::value>(
+    rvv_vls::ondemand::value &out) noexcept;
+template<> _simdjson_inline _simdjson_result<rvv_vls::ondemand::value>
+_simdjson_result<rvv_vls::ondemand::value>::get<rvv_vls::ondemand::value>() noexcept;
 
 } // namespace _simdjson
 
@@ -174154,8 +176125,6 @@ public:
   static _simdjson_inline bool release_parser();
 
 private:
-  friend bool release_parser();
-  friend ondemand::parser& get_parser();
   /** Get the thread-local parser instance, allocates it if needed */
   static _simdjson_inline _simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
@@ -174318,13 +176287,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like "[*]" to match all array elements.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the array and returns a string_view instance corresponding to the
@@ -174448,7 +176425,13 @@ public:
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at(size_t index) noexcept;
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   _simdjson_inline _simdjson_result<std::string_view> raw_json() noexcept;
 #if _SIMDJSON_SUPPORTS_CONCEPTS
   // TODO: move this code into object-inl.h
@@ -174680,6 +176663,26 @@ public:
    * @returns INCORRECT_TYPE If the JSON value is not a 64-bit integer.
    */
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit unsigned integer.
+   *
+   * Calls get_uint64() and checks that the result fits in a uint32_t.
+   *
+   * @returns A 32-bit unsigned integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an unsigned integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in a uint32_t.
+   */
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  /**
+   * Cast this JSON value to a 32-bit signed integer.
+   *
+   * Calls get_int64() and checks that the result fits in an int32_t.
+   *
+   * @returns A 32-bit signed integer.
+   * @returns INCORRECT_TYPE If the JSON value is not an integer.
+   * @returns NUMBER_OUT_OF_RANGE If the value does not fit in an int32_t.
+   */
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   /**
    * Cast this JSON value to a double.
    *
@@ -175328,21 +177331,24 @@ public:
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    *
    * Supports wildcard patterns like "$.array[*]" or "$.object.*" to match multiple elements.
    *
-   * This method materializes all matching values into a vector.
    * The document will be consumed after this call.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern, or:
-   *         - INVALID_JSON_POINTER if the JSONPath cannot be parsed
-   *         - NO_SUCH_FIELD if a field does not exist
-   *         - INDEX_OUT_OF_BOUNDS if an array index is out of bounds
-   *         - INCORRECT_TYPE if path traversal encounters wrong type
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
    */
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Consumes the document and returns a string_view instance corresponding to the
@@ -175433,6 +177439,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -175561,7 +177569,13 @@ public:
   _simdjson_inline _simdjson_result<std::string_view> raw_json_token() noexcept;
   _simdjson_inline _simdjson_result<value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
 private:
   document *doc{nullptr};
@@ -175586,6 +177600,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -175645,7 +177661,13 @@ public:
 
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -175673,6 +177695,8 @@ public:
   _simdjson_inline _simdjson_result<uint64_t> get_uint64_in_string() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64() noexcept;
   _simdjson_inline _simdjson_result<int64_t> get_int64_in_string() noexcept;
+  _simdjson_inline _simdjson_result<uint32_t> get_uint32() noexcept;
+  _simdjson_inline _simdjson_result<int32_t> get_int32() noexcept;
   _simdjson_inline _simdjson_result<double> get_double() noexcept;
   _simdjson_inline _simdjson_result<double> get_double_in_string() noexcept;
   _simdjson_inline _simdjson_result<std::string_view> get_string(bool allow_replacement = false) noexcept;
@@ -175728,7 +177752,13 @@ public:
 
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 #if _SIMDJSON_STATIC_REFLECTION
   template<constevalutil::fixed_string... FieldNames, typename T>
     requires(std::is_class_v<T> && (sizeof...(FieldNames) > 0))
@@ -176381,13 +178411,21 @@ public:
   inline _simdjson_result<value> at_path(std::string_view json_path) noexcept;
 
   /**
-   * Get all values matching the given JSONPath expression with wildcard support.
+   * Call the provided callback for each value matching the given JSONPath
+   * expression with wildcard support.
    * Supports wildcard patterns like ".*" to match all object fields.
    *
    * @param json_path JSONPath expression with wildcards
-   * @return Vector of values matching the wildcard pattern
+   * @param callback Function called for each matching value
+   * @return error_code indicating success or failure
   */
-  inline _simdjson_result<std::vector<value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, value>
+#else
+  template <typename Func>
+#endif
+  inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
 
   /**
    * Reset the iterator so that we are pointing back at the
@@ -176537,7 +178575,13 @@ public:
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> operator[](std::string_view key) && noexcept;
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_pointer(std::string_view json_pointer) noexcept;
   _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> at_path(std::string_view json_path) noexcept;
-  _simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> at_path_with_wildcard(std::string_view json_path) noexcept;
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+  template <typename Func>
+    requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+  template <typename Func>
+#endif
+  _simdjson_inline error_code for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept;
   inline _simdjson_result<bool> reset() noexcept;
   inline _simdjson_result<bool> is_empty() noexcept;
   inline _simdjson_result<size_t> count_fields() & noexcept;
@@ -177551,46 +179595,34 @@ inline _simdjson_result<value> array::at_path(std::string_view json_path) noexce
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code array::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
   // Wildcard case
-  if(key=="*"){
-    for(auto element: *this){
-
-      if(element.error()){
-        return element.error();
-      }
-
-      if(remaining_path.empty()){
-        // Use value_unsafe() because we've already checked for errors above.
-        // The 'element' is a _simdjson_result<value> wrapper, and we need to extract
-        // the underlying value. value_unsafe() is safe here because error() returned false.
-        result.push_back(std::move(element).value_unsafe());
-
-      }else{
-        auto nested_result = element.at_path_with_wildcard(remaining_path);
-
-        if(nested_result.error()){
-          return nested_result.error();
-        }
-        // Same logic as above.
-        std::vector<value> nested_matches = std::move(nested_result).value_unsafe();
-
-        result.insert(result.end(),
-                      std::make_move_iterator(nested_matches.begin()),
-                      std::make_move_iterator(nested_matches.end()));
+  if (key=="*"){
+    for(auto element: *this) {
+      value val;
+        _SIMDJSON_TRY(element.get(val));
+      if (remaining_path.empty()) {
+        callback(val);
+      } else {
+        error_code err = element.for_each_at_path_with_wildcard(remaining_path, callback);
+        if(err) { return err; }
       }
     }
-    return result;
-  }else{
+    return SUCCESS;
+  } else {
     // Specific index case in which we access the element at the given index
-    size_t idx=0;
+    size_t idx = 0;
 
-    for(char c:key){
+    for (char c : key) {
       if(c < '0' || c > '9'){
         return INVALID_JSON_POINTER;
       }
@@ -177598,16 +179630,13 @@ inline _simdjson_result<std::vector<value>> array::at_path_with_wildcard(std::st
     }
 
     auto element = at(idx);
-
-    if(element.error()){
-      return element.error();
-    }
-
-    if(remaining_path.empty()){
-      result.push_back(std::move(element).value_unsafe());
-      return result;
-    }else{
-      return element.at_path_with_wildcard(remaining_path);
+    value val;
+    _SIMDJSON_TRY(element.get(val));
+    if (remaining_path.empty()){
+      callback(val);
+      return SUCCESS;
+    } else {
+      return element.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -177670,9 +179699,15 @@ _simdjson_inline  _simdjson_result<rvv_vls::ondemand::value> _simdjson_result<rv
   if (error()) { return error(); }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> _simdjson_result<rvv_vls::ondemand::array>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<rvv_vls::ondemand::array>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 _simdjson_inline  _simdjson_result<std::string_view> _simdjson_result<rvv_vls::ondemand::array>::raw_json() noexcept {
   if (error()) { return error(); }
@@ -177791,6 +179826,8 @@ _simdjson_inline bool _simdjson_result<rvv_vls::ondemand::array_iterator>::at_en
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
 
+#include <limits>
+
 namespace _simdjson {
 namespace rvv_vls {
 namespace ondemand {
@@ -177851,6 +179888,18 @@ _simdjson_inline _simdjson_result<int64_t> value::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> value::get_int64_in_string() noexcept {
   return iter.get_int64_in_string();
 }
+_simdjson_inline _simdjson_result<uint32_t> value::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> value::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<bool> value::get_bool() noexcept {
   return iter.get_bool();
 }
@@ -177866,6 +179915,8 @@ template<> _simdjson_inline _simdjson_result<number> value::get() noexcept { ret
 template<> _simdjson_inline _simdjson_result<double> value::get() noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> value::get() noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> value::get() noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> value::get() noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> value::get() noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> value::get() noexcept { return get_bool(); }
 
 
@@ -177877,6 +179928,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code value::get(number& 
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(double& out) noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint64_t& out) noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int64_t& out) noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(uint32_t& out) noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code value::get(int32_t& out) noexcept { return get_int32().get(out); }
 template<>  _simdjson_warn_unused _simdjson_inline error_code value::get(bool& out) noexcept { return get_bool().get(out); }
 
 #if _SIMDJSON_EXCEPTIONS
@@ -178075,14 +180128,20 @@ _simdjson_inline _simdjson_result<value> value::at_path(std::string_view json_pa
   }
 }
 
-inline _simdjson_result<std::vector<value>> value::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   json_type t;
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -178179,6 +180238,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<rvv_vls::ondemand::v
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<rvv_vls::ondemand::value>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<rvv_vls::ondemand::value>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<rvv_vls::ondemand::value>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<rvv_vls::ondemand::value>::get_double() noexcept {
   if (error()) { return error(); }
@@ -178338,12 +180405,18 @@ _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> _simdjson_result<rvv
   return first.at_path(json_path);
 }
 
-inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> _simdjson_result<rvv_vls::ondemand::value>::at_path_with_wildcard(
-      std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+template <typename Func>
+#endif
+inline error_code _simdjson_result<rvv_vls::ondemand::value>::for_each_at_path_with_wildcard(
+      std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
     return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 } // namespace _simdjson
@@ -178369,6 +180442,8 @@ inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> _simdjson_result<
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/value_iterator-inl.h" */
 /* amalgamation skipped (editor-only): #include "_simdjson/generic/ondemand/deserialize.h" */
 /* amalgamation skipped (editor-only): #endif // _SIMDJSON_CONDITIONAL_INCLUDE */
+
+#include <limits>
 
 namespace _simdjson {
 namespace rvv_vls {
@@ -178485,6 +180560,18 @@ _simdjson_inline _simdjson_result<int64_t> document::get_int64() noexcept {
 _simdjson_inline _simdjson_result<int64_t> document::get_int64_in_string() noexcept {
   return get_root_value_iterator().get_root_int64_in_string(true);
 }
+_simdjson_inline _simdjson_result<uint32_t> document::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(get_uint64().get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(get_int64().get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document::get_double() noexcept {
   return get_root_value_iterator().get_root_double(true);
 }
@@ -178518,6 +180605,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document::get() &
 template<> _simdjson_inline _simdjson_result<double> document::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document::get() & noexcept { return get_value(); }
 
@@ -178528,6 +180617,8 @@ template<> _simdjson_warn_unused _simdjson_inline error_code document::get(std::
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(double& out) & noexcept { return get_double().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint64_t& out) & noexcept { return get_uint64().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int64_t& out) & noexcept { return get_int64().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(uint32_t& out) & noexcept { return get_uint32().get(out); }
+template<> _simdjson_warn_unused _simdjson_inline error_code document::get(int32_t& out) & noexcept { return get_int32().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(bool& out) & noexcept { return get_bool().get(out); }
 template<> _simdjson_warn_unused _simdjson_inline error_code document::get(value& out) & noexcept { return get_value().get(out); }
 
@@ -178701,8 +180792,14 @@ _simdjson_inline _simdjson_result<value> document::at_path(std::string_view json
   }
 }
 
-_simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wildcard(std::string_view json_path) noexcept {
-  rewind(); // Rewind the document each time at_path_with_wildcard is called
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  rewind(); // Rewind the document each time for_each_at_path_with_wildcard is called
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
   }
@@ -178710,9 +180807,9 @@ _simdjson_inline _simdjson_result<std::vector<value>> document::at_path_with_wil
   _SIMDJSON_TRY(type().get(t));
   switch (t) {
   case json_type::array:
-      return (*this).get_array().at_path_with_wildcard(json_path);
+      return (*this).get_array().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   case json_type::object:
-      return (*this).get_object().at_path_with_wildcard(json_path);
+      return (*this).get_object().for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
   default:
       return INVALID_JSON_POINTER;
   }
@@ -178857,6 +180954,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<rvv_vls::ondemand::d
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<rvv_vls::ondemand::document>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<rvv_vls::ondemand::document>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<rvv_vls::ondemand::document>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<rvv_vls::ondemand::document>::get_double() noexcept {
   if (error()) { return error(); }
@@ -179041,9 +181146,15 @@ _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> _simdjson_result<rvv
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> _simdjson_result<rvv_vls::ondemand::document>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<rvv_vls::ondemand::document>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 #if _SIMDJSON_STATIC_REFLECTION
@@ -179085,6 +181196,18 @@ _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64() noe
 _simdjson_inline _simdjson_result<uint64_t> document_reference::get_uint64_in_string() noexcept { return doc->get_root_value_iterator().get_root_uint64_in_string(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64() noexcept { return doc->get_root_value_iterator().get_root_int64(false); }
 _simdjson_inline _simdjson_result<int64_t> document_reference::get_int64_in_string() noexcept { return doc->get_root_value_iterator().get_root_int64_in_string(false); }
+_simdjson_inline _simdjson_result<uint32_t> document_reference::get_uint32() noexcept {
+  uint64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_uint64(false).get(result));
+  if (result > (std::numeric_limits<uint32_t>::max)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<uint32_t>(result);
+}
+_simdjson_inline _simdjson_result<int32_t> document_reference::get_int32() noexcept {
+  int64_t result;
+  _SIMDJSON_TRY(doc->get_root_value_iterator().get_root_int64(false).get(result));
+  if (result > (std::numeric_limits<int32_t>::max)() || result < (std::numeric_limits<int32_t>::min)()) { return NUMBER_OUT_OF_RANGE; }
+  return static_cast<int32_t>(result);
+}
 _simdjson_inline _simdjson_result<double> document_reference::get_double() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<double> document_reference::get_double_in_string() noexcept { return doc->get_root_value_iterator().get_root_double(false); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::get_string(bool allow_replacement) noexcept { return doc->get_root_value_iterator().get_root_string(false, allow_replacement); }
@@ -179102,6 +181225,8 @@ template<> _simdjson_inline _simdjson_result<std::string_view> document_referenc
 template<> _simdjson_inline _simdjson_result<double> document_reference::get() & noexcept { return get_double(); }
 template<> _simdjson_inline _simdjson_result<uint64_t> document_reference::get() & noexcept { return get_uint64(); }
 template<> _simdjson_inline _simdjson_result<int64_t> document_reference::get() & noexcept { return get_int64(); }
+template<> _simdjson_inline _simdjson_result<uint32_t> document_reference::get() & noexcept { return get_uint32(); }
+template<> _simdjson_inline _simdjson_result<int32_t> document_reference::get() & noexcept { return get_int32(); }
 template<> _simdjson_inline _simdjson_result<bool> document_reference::get() & noexcept { return get_bool(); }
 template<> _simdjson_inline _simdjson_result<value> document_reference::get() & noexcept { return get_value(); }
 #if _SIMDJSON_EXCEPTIONS
@@ -179140,7 +181265,13 @@ _simdjson_inline _simdjson_result<number> document_reference::get_number() noexc
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json_token() noexcept { return doc->raw_json_token(); }
 _simdjson_inline _simdjson_result<value> document_reference::at_pointer(std::string_view json_pointer) noexcept { return doc->at_pointer(json_pointer); }
 _simdjson_inline _simdjson_result<value> document_reference::at_path(std::string_view json_path) noexcept { return doc->at_path(json_path); }
-_simdjson_inline _simdjson_result<std::vector<value>> document_reference::at_path_with_wildcard(std::string_view json_path) noexcept { return doc->at_path_with_wildcard(json_path); }
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code document_reference::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept { return doc->for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback)); }
 _simdjson_inline _simdjson_result<std::string_view> document_reference::raw_json() noexcept { return doc->raw_json();}
 _simdjson_inline document_reference::operator document&() const noexcept { return *doc; }
 #if _SIMDJSON_SUPPORTS_CONCEPTS && _SIMDJSON_STATIC_REFLECTION
@@ -179232,6 +181363,14 @@ _simdjson_inline _simdjson_result<int64_t> _simdjson_result<rvv_vls::ondemand::d
 _simdjson_inline _simdjson_result<int64_t> _simdjson_result<rvv_vls::ondemand::document_reference>::get_int64_in_string() noexcept {
   if (error()) { return error(); }
   return first.get_int64_in_string();
+}
+_simdjson_inline _simdjson_result<uint32_t> _simdjson_result<rvv_vls::ondemand::document_reference>::get_uint32() noexcept {
+  if (error()) { return error(); }
+  return first.get_uint32();
+}
+_simdjson_inline _simdjson_result<int32_t> _simdjson_result<rvv_vls::ondemand::document_reference>::get_int32() noexcept {
+  if (error()) { return error(); }
+  return first.get_int32();
 }
 _simdjson_inline _simdjson_result<double> _simdjson_result<rvv_vls::ondemand::document_reference>::get_double() noexcept {
   if (error()) { return error(); }
@@ -179397,11 +181536,17 @@ _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> _simdjson_result<rvv
   }
   return first.at_path(json_path);
 }
-_simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> _simdjson_result<rvv_vls::ondemand::document_reference>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<rvv_vls::ondemand::document_reference>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) {
       return error();
   }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 #if _SIMDJSON_STATIC_REFLECTION
 template<constevalutil::fixed_string... FieldNames, typename T>
@@ -180979,9 +183124,13 @@ inline _simdjson_result<value> object::at_path(std::string_view json_path) noexc
   return at_pointer(json_pointer);
 }
 
-inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::string_view json_path) noexcept {
-  std::vector<value> result;
-
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, value>
+#else
+template <typename Func>
+#endif
+inline error_code object::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   auto result_pair = get_next_key_and_json_path(json_path);
   std::string_view key = result_pair.first;
   std::string_view remaining_path = result_pair.second;
@@ -180991,34 +183140,22 @@ inline _simdjson_result<std::vector<value>> object::at_path_with_wildcard(std::s
     for (auto field : *this) {
       value val;
       _SIMDJSON_TRY(field.value().get(val));
-
       if (remaining_path.empty()) {
-        result.push_back(std::move(val));
+        callback(val);
       } else {
-        auto nested_result = val.at_path_with_wildcard(remaining_path);
-
-        if (nested_result.error()) {
-          return nested_result.error();
-        }
-        // Extract and append all nested matches to our result
-        std::vector<value> nested_vec;
-        _SIMDJSON_TRY(std::move(nested_result).get(nested_vec));
-
-        result.insert(result.end(),
-                     std::make_move_iterator(nested_vec.begin()),
-                     std::make_move_iterator(nested_vec.end()));
+        _SIMDJSON_TRY(val.for_each_at_path_with_wildcard(remaining_path, callback));
       }
     }
-    return result;
+    return SUCCESS;
   } else {
     value val;
     _SIMDJSON_TRY(find_field(key).get(val));
 
     if (remaining_path.empty()) {
-      result.push_back(std::move(val));
-      return result;
+      callback(val);
+      return SUCCESS;
     } else {
-      return val.at_path_with_wildcard(remaining_path);
+      return val.for_each_at_path_with_wildcard(remaining_path, callback);
     }
   }
 }
@@ -181149,9 +183286,15 @@ _simdjson_inline _simdjson_result<rvv_vls::ondemand::value> _simdjson_result<rvv
   return first.at_path(json_path);
 }
 
-_simdjson_inline _simdjson_result<std::vector<rvv_vls::ondemand::value>> _simdjson_result<rvv_vls::ondemand::object>::at_path_with_wildcard(std::string_view json_path) noexcept {
+#if _SIMDJSON_SUPPORTS_CONCEPTS
+template <typename Func>
+  requires std::invocable<Func, rvv_vls::ondemand::value>
+#else
+template <typename Func>
+#endif
+_simdjson_inline error_code _simdjson_result<rvv_vls::ondemand::object>::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
   if (error()) { return error(); }
-  return first.at_path_with_wildcard(json_path);
+  return first.for_each_at_path_with_wildcard(json_path, std::forward<Func>(callback));
 }
 
 inline _simdjson_result<bool> _simdjson_result<rvv_vls::ondemand::object>::reset() noexcept {
@@ -181505,7 +183648,7 @@ _simdjson_pure _simdjson_inline size_t parser::max_depth() const noexcept {
 }
 
 _simdjson_inline void parser::set_max_capacity(size_t max_capacity) noexcept {
-  if(max_capacity < dom::MINIMAL_DOCUMENT_CAPACITY) {
+  if(max_capacity > dom::MINIMAL_DOCUMENT_CAPACITY) {
     _max_capacity = max_capacity;
   } else {
     _max_capacity = dom::MINIMAL_DOCUMENT_CAPACITY;
@@ -181532,7 +183675,7 @@ _simdjson_inline _simdjson_warn_unused ondemand::parser& parser::get_parser() {
   return *parser::get_parser_instance();
 }
 
-_simdjson_inline bool release_parser() {
+_simdjson_inline bool parser::release_parser() {
   auto &parser_instance = parser::get_threadlocal_parser_if_exists();
   if (parser_instance) {
     parser_instance.reset();

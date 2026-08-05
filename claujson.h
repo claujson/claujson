@@ -855,7 +855,7 @@ namespace claujson {
 		}
 	public:
 
-		int offset() const noexcept {
+		int64_t offset() const noexcept {
 			if (_return()) {
 				return _offset;
 			}
@@ -904,6 +904,8 @@ namespace claujson {
 	private:
 		_simdjson::dom::parser_for_claujson test_;
 		std::unique_ptr<ThreadPool> pool;
+	public:
+		uint64_t DEPTH_MAX = 1024;
 	public:
 		parser(int thr_num = 0);
 	public:

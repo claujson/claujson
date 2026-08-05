@@ -5358,7 +5358,7 @@ namespace claujson {
 			}
 
 			log << info << "max depth " << count_open_ << "\n";
-			const int DEPTH_MAX = 1024;
+			
 			if (count_open_ > DEPTH_MAX) {
 				return { false, -23 };
 			}
@@ -5569,7 +5569,7 @@ namespace claujson {
 							count_[i] += count_[i - 1];
 						}
 						log << info << "depth max " << sum << "\n";
-						if (sum > 1024) {
+						if (sum > DEPTH_MAX) {
 							free(count_vec); return { false, -10 };
 						}
 					}
@@ -5588,7 +5588,7 @@ namespace claujson {
 
 						log << info << "depth max " << count_open_ << "\n";
 
-						if (count_open_ > 1024) {
+						if (count_open_ > DEPTH_MAX) {
 							free(count_vec);
 							return { false, -10 };
 						}
@@ -5907,7 +5907,7 @@ namespace claujson {
 					count_[i] += count_[i - 1];
 				}
 				log << "depth max " << sum << "\n";
-				if (sum > 1024) {
+				if (sum > DEPTH_MAX) {
 					free(count_vec); return { false, -10 };
 				}
 			}

@@ -2746,7 +2746,8 @@ namespace claujson {
 		stream << StringView(str_stream.buf(), str_stream.buf_size());
 	}
 
-	void LoadData2::write_(StrStream& stream, const _Value& global, StructuredPtr temp, bool pretty, bool hint) {
+	void LoadData2::write_(StrStream& _stream, const _Value& global, StructuredPtr temp, bool pretty, bool hint) {
+		StrStream stream = std::move(_stream);
 
 		std::vector<StructuredPtr> chk_list; // point for division?, virtual nodes? }}}?
 
@@ -2790,6 +2791,8 @@ namespace claujson {
 
 			write_primitive(stream, x);
 		}
+
+		_stream = std::move(stream);
 	}
 
 	void LoadData2::write_parallel(const std::string& fileName, _Value& j, uint64_t thr_num, bool pretty) {

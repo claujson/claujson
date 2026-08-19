@@ -303,7 +303,7 @@ namespace claujson {
 			{
 				_Value temp2;
 				bool e = false;
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, use_heap_string);
+				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
 				if (e) {
 
 					CLAUJSON_ERROR("Error in add_item_type");

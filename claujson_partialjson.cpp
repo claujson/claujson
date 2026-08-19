@@ -199,13 +199,13 @@ namespace claujson {
 
 				bool e = false;
 
-				claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, use_heap_string);
+				claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, !use_heap_string);
 
 				if (e) {
 					CLAUJSON_ERROR("Error in add_item_type");
 				}
 
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, use_heap_string);
+				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
 
 				if (e) {
 					CLAUJSON_ERROR("Error in add_item_type");
@@ -231,7 +231,7 @@ namespace claujson {
 				_Value temp2;
 				bool e = false;
 
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, use_heap_string);
+				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
 
 				if (e) {
 
@@ -258,7 +258,7 @@ namespace claujson {
 			_Value temp;
 			bool e = false;
 
-			claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, use_heap_string);
+			claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, !use_heap_string);
 
 			if (e) {
 				CLAUJSON_ERROR("Error in add_user_type");

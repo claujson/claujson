@@ -2433,7 +2433,7 @@ namespace claujson {
 				}
 			}
 		}
-		else if (data) { // valid
+		else if (data.is_valid()) { // valid
 			auto& x = data;
 
 			write_primitive(stream, x);
@@ -2557,7 +2557,7 @@ namespace claujson {
 				}
 			}
 		}
-		else if (data) { // valid
+		else if (data.is_valid()) { // valid
 			auto& x = data;
 
 			write_primitive(stream, x);
@@ -5954,7 +5954,7 @@ namespace claujson {
 	}
 
 	State::~State() {
-		if (this->pj) {
+		if (this->pj.is_valid()) {
 			clean(this->pj);
 		}
 	}
@@ -6740,7 +6740,7 @@ namespace claujson {
 				_Value& parent = value;
 
 				// case : result.json_pointer returns root?
-				if (!parent) {
+				if (!parent.is_valid()) {
 					if (result.is_structured()) {
 						//clean(result);
 					}

@@ -111,8 +111,6 @@ namespace claujson {
 
 		_Value clone() const;
 
-		explicit operator bool() const;
-
 		explicit _Value(Array* x);
 		explicit _Value(Object* x);
 		explicit _Value(PartialJson* x);

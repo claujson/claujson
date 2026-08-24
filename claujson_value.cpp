@@ -28,9 +28,6 @@ namespace claujson {
 
 		return x;
 	}
-	_Value::operator bool() const {
-		return this->is_valid();
-	}
 
 	_Value::_Value(Array* x) {
 		this->_int_val = 0;

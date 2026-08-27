@@ -979,6 +979,21 @@ namespace claujson {
 			//
 		}
 
+		~StrStream() {
+
+		}
+
+		StrStream& operator=(StrStream&& other) {
+			if (this == &other) { return *this; }
+
+			this->m_buffer = std::move(other.m_buffer);
+
+			return *this;
+		}
+		StrStream(StrStream&& other) {
+			this->m_buffer = std::move(other.m_buffer);
+		}
+
 	public:
 
 		const char* buf() const {
@@ -3102,11 +3117,14 @@ namespace claujson {
 		return view_arr;
 	}
 
-	void print(JsonView* json_view, JsonView* end, claujson::StrStream& strStream) {
+	void print(JsonView* json_view, JsonView* end, claujson::StrStream& _strStream) {
+		StrStream strStream = std::move(_strStream);
+
 		const bool pretty = false;
 
 		while (json_view->type != -1) {
 			if (json_view == end) {
+				_strStream = std::move(strStream);
 				return;
 			}
 
@@ -3159,13 +3177,17 @@ namespace claujson {
 
 			++json_view;
 		}
+		_strStream = std::move(strStream);
 	}
 
-	void print_pretty(JsonView* json_view, JsonView* end, claujson::StrStream& strStream) {
+	void print_pretty(JsonView* json_view, JsonView* end, claujson::StrStream& _strStream) {
+		StrStream strStream = std::move(_strStream);
+		
 		const bool pretty = true;
 
 		while (json_view->type != -1) {
 			if (json_view == end) {
+				_strStream = std::move(strStream);
 				return;
 			}
 
@@ -3218,6 +3240,7 @@ namespace claujson {
 
 			++json_view;
 		}
+		_strStream = std::move(strStream);
 	}
 
 	void LoadData2::write_parallel2(const std::string& fileName, const _Value& j, uint64_t thr_num, bool pretty) {

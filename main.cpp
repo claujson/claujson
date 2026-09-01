@@ -26,7 +26,7 @@ void utf_8_test() {
 
 	// C++17 - stringview, C++20~ - u8string_view
 	_Value x(u8"こんにちは \\n wow hihi"sv); // no sv -> Data(bool)
-	if (x) { // if before string is not valid utf-8, then x is not valid. x -> false
+	if (x.is_valid()) { // if before string is not valid utf-8, then x is not valid. x -> false
 		auto& y = x.str_val();
 		std::cout << y.data() << "\n";
 	}

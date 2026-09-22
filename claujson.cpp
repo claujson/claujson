@@ -1718,6 +1718,7 @@ namespace claujson {
 
 				TokenTemp key;
 
+				auto* p_0 = &imple->structural_indexes[0];
 				auto* p_start = &imple->structural_indexes[token_arr_start];
 				auto* p_end = &imple->structural_indexes[token_arr_start + token_arr_len];
 				for (auto* p = &imple->structural_indexes[token_arr_start]; p != p_end; ++p) {
@@ -1737,8 +1738,8 @@ namespace claujson {
 
 							data.buf_idx = *p;
 							data.token_idx = token_arr_start + (p - p_start);
-							// p - p_start <- idx
-							if ((p - p_start) < imple->n_structural_indexes) {
+							// p - p_0 <- idx
+							if ((p + 1 - p_0) < imple->n_structural_indexes) {
 								data.next_buf_idx = *(p + 1);
 							}
 							else {

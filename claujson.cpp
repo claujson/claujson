@@ -1721,6 +1721,330 @@ namespace claujson {
 				auto* p_0 = &imple->structural_indexes[0];
 				auto* p_start = &imple->structural_indexes[token_arr_start];
 				auto* p_end = &imple->structural_indexes[token_arr_start + token_arr_len];
+				auto* p = &imple->structural_indexes[token_arr_start];
+
+			chunk_start:
+
+			start:
+				{
+					const char type = (buf[*p]);
+
+					switch (type) {
+					case ',':
+					{
+						++p; // pass comma.
+						bool is_key = p + 1 < p_end && buf[*(p + 1)] == ':';
+						if (is_key) {
+							goto object_element;
+						}
+						else {
+							goto array_element;
+						}
+					}
+					case '[':
+						goto array_start;
+					case '{':
+						goto object_start;
+					case ']':
+						goto array_end;
+					case '}':
+						goto object_end;
+
+					default: // first chunk!, only one item.
+					{
+						TokenTemp data;
+
+						data.buf_idx = *p;
+						data.token_idx = token_arr_start + (p - p_start);
+						// p - p_0 <- idx
+						if ((p + 1 - p_0) < imple->n_structural_indexes) {
+							data.next_buf_idx = *(p + 1);
+						}
+						else {
+							data.next_buf_idx = buf_len;
+						}
+
+						nowUT.add_item_type(data.buf_idx, data.next_buf_idx, buf, data.token_idx, use_lex_string);
+
+						++p;
+					}
+					goto chunk_end;
+					}
+				}
+			array_start:
+				{
+					++p; // pass [
+
+					if (key.is_key) {
+						nowUT.add_user_type(key.buf_idx, key.next_buf_idx, buf,
+							_ValueType::ARRAY, key.token_idx, use_lex_string
+						); // object vs array
+						key.is_key = false;
+					}
+					else {
+						nowUT.add_user_type(_ValueType::ARRAY);
+					}
+
+					class StructuredPtr pTemp = nowUT.get_value_list(nowUT.get_data_size() - 1);
+
+					braceNum++;
+
+					/// initial new nestedUT.
+					nowUT = pTemp;
+					nowUT.reserve_data_list(count_vec[left_no++]);
+				}
+
+			array_element:
+
+				if (buf[*p] == ']') {
+					goto array_end;
+				}
+
+				switch (buf[*p]) {
+				case '{':
+					goto object_start;
+				case '[':
+					goto array_start;
+				default:
+				{
+					TokenTemp data;
+
+					data.buf_idx = *p;
+					data.token_idx = token_arr_start + (p - p_start);
+					// p - p_0 <- idx
+					if ((p + 1 - p_0) < imple->n_structural_indexes) {
+						data.next_buf_idx = *(p + 1);
+					}
+					else {
+						data.next_buf_idx = buf_len;
+					}
+
+					nowUT.add_item_type(data.buf_idx, data.next_buf_idx, buf, data.token_idx, use_lex_string);
+
+					++p; // pass value
+
+					// continue?
+					const char type = (buf[*p]);
+
+					switch (type) {
+					case ',':
+						++p; // pass comma 
+
+						if (p >= p_end) {
+							goto chunk_end;
+						}
+
+						goto array_element;
+					case ']': goto array_end;
+					default:
+						goto error;
+					}
+				}
+				}
+
+			array_end:
+				++p; // pass ]
+
+				{
+					if (braceNum == 0) {
+
+						_Value _ut; // is v_array or v_object.
+
+						_ut = Array::MakeVirtual();
+
+						StructuredPtr ut = _ut;
+						uint64_t len = nowUT.get_data_size();
+						ut.reserve_data_list(len);
+
+						if (len > 0 && nowUT.get_value_list(0).is_virtual()) {
+							ut.add_array_element(std::move(nowUT.get_value_list(0)));
+							--len;
+						}
+
+						for (uint64_t i = 0; i < len; ++i) {
+							if (nowUT.get_value_list(i).is_structured()) {
+								ut.add_array_element(std::move(nowUT.get_value_list(i)));
+							}
+							else {
+								ut.add_array_element(std::move(nowUT.get_value_list(i)));
+							}
+						}
+
+						nowUT.clear();
+						nowUT.add_array_element(std::move(_ut)); // this nowUT is always PartialJson?
+					}
+					else {
+						braceNum--;
+
+						nowUT = nowUT.get_parent();
+					}
+				}
+
+				if (p != p_end) {
+					goto start;
+				}
+				else {
+					goto chunk_end;
+				}
+
+			object_start:
+				{
+					++p; // pass {
+					if (key.is_key) {
+						nowUT.add_user_type(key.buf_idx, key.next_buf_idx, buf,
+							_ValueType::OBJECT, key.token_idx, use_lex_string
+						); // object vs array
+						key.is_key = false;
+					}
+					else {
+						nowUT.add_user_type(_ValueType::OBJECT);
+					}
+
+					class StructuredPtr pTemp = nowUT.get_value_list(nowUT.get_data_size() - 1);
+
+					braceNum++;
+
+					/// initial new nestedUT.
+					nowUT = pTemp;
+					nowUT.reserve_data_list(count_vec[left_no++]);
+				}
+
+			object_element:
+
+				if (buf[*p] == '}') {
+					goto object_end;
+				}
+
+				// key
+				{
+					TokenTemp data;
+
+					data.buf_idx = *p;
+					data.token_idx = token_arr_start + (p - p_start);
+					// p - p_0 <- idx
+					if ((p + 1 - p_0) < imple->n_structural_indexes) {
+						data.next_buf_idx = *(p + 1);
+					}
+					else {
+						data.next_buf_idx = buf_len;
+					}
+
+					data.is_key = true;
+
+					key = std::move(data);
+
+					++p; // pass key
+					++p; // pass :
+				}
+				// value
+				switch (buf[*p]) {
+				case '{':
+					goto object_start;
+				case '[':
+					goto array_start;
+				default:
+				{
+					TokenTemp data;
+
+					data.buf_idx = *p;
+					data.token_idx = token_arr_start + (p - p_start);
+					// p - p_0 <- idx
+					if ((p + 1 - p_0) < imple->n_structural_indexes) {
+						data.next_buf_idx = *(p + 1);
+					}
+					else {
+						data.next_buf_idx = buf_len;
+					}
+					nowUT.add_item_type(key.buf_idx, key.next_buf_idx, data.buf_idx, data.next_buf_idx, buf, key.token_idx, data.token_idx, use_lex_string);
+					key.is_key = false;
+					++p; // pass value
+				}
+				}
+
+			object_continue:
+				// continue?
+				{
+					const char type = (buf[*p]);
+
+					switch (type) {
+					case ',': 
+						++p; // pass comma
+
+						if (p >= p_end) {
+							goto chunk_end;
+						}
+						goto object_element;
+					case '}': goto object_end;
+					default:
+						goto error;
+					}
+				}
+
+			object_end:
+				++p;  // pass }
+
+				{
+					if (braceNum == 0) {
+
+						_Value _ut; // is v_array or v_object.
+
+						_ut = Object::MakeVirtual();
+
+						StructuredPtr ut = _ut;
+						uint64_t len = nowUT.get_data_size();
+						ut.reserve_data_list(len);
+
+						if (len > 0 && nowUT.get_value_list(0).is_virtual()) {
+							ut.add_object_element(_Value(), std::move(nowUT.get_value_list(0)));
+							--len;
+						}
+
+						for (uint64_t i = 0; i < len; ++i) {
+							if (nowUT.get_value_list(i).is_structured()) {
+								if (nowUT.get_value_list(i).is_virtual()) {
+									ut.add_object_element(_Value(), std::move(nowUT.get_value_list(i)));
+								}
+								else {
+									ut.add_object_element(std::move(nowUT.get_key_list(i)), std::move(nowUT.get_value_list(i)));
+								}
+							}
+							else {
+								ut.add_object_element(std::move(nowUT.get_key_list(i)),
+									std::move(nowUT.get_value_list(i)));
+							}
+						}
+
+						nowUT.clear();
+						nowUT.add_array_element(std::move(_ut)); // this nowUT is always PartialJson?
+					}
+					else {
+						braceNum--;
+
+						nowUT = nowUT.get_parent();
+					}
+				}
+
+				if (p != p_end) {
+					goto start;
+				}
+				else {
+					goto chunk_end;
+				}
+
+			chunk_end:
+				if (next) {
+					*next = nowUT;
+				}
+				return true;
+
+			error:
+				*err = -100;
+
+				log << warn << "error in Parse1\n";
+
+				return false;
+
+				/*
 				for (auto* p = &imple->structural_indexes[token_arr_start]; p != p_end; ++p) {
 					const char type = (buf[*p]);
 
@@ -1863,7 +2187,7 @@ namespace claujson {
 					*next = nowUT;
 				}
 
-				return true;
+				return true; */
 			}
 			catch (const char* _err) {
 				*err = -10;

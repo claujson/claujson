@@ -1733,6 +1733,11 @@ namespace claujson {
 					case ',':
 					{
 						++p; // pass comma.
+						
+						if (p >= p_end) {
+							goto chunk_end;
+						}
+
 						bool is_key = p + 1 < p_end && buf[*(p + 1)] == ':';
 						if (is_key) {
 							goto object_element;

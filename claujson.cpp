@@ -2342,7 +2342,7 @@ namespace claujson {
 							// Merge
 
 							{
-								int i = 0;
+								/*int i = 0;
 								std_vector<int> chk(parse_num, 0);
 								auto x = next.begin();
 								auto y = __global.begin();
@@ -2359,10 +2359,10 @@ namespace claujson {
 										break;
 									}
 								}
-
+								*/
 								uint64_t start = 0;
 								uint64_t last = pivots.size() - 1 - 1;
-
+								/*
 								for (uint64_t i = 0; i < pivots.size() - 1; ++i) {
 									if (chk[i] == 0) {
 										start = i;
@@ -2377,6 +2377,7 @@ namespace claujson {
 									}
 								}
 
+								*/
 
 								if (is_first && __global[start].get_data_size() > 0 && __global[start].get_value_list(0).is_structured()
 									&& (__global[start].get_value_list(0).is_virtual())) {
@@ -2398,18 +2399,21 @@ namespace claujson {
 
 									for (uint64_t i = start + 1; i <= last; ++i) {
 
+										/*
 										if (chk[i]) {
 											continue;
 										}
-
+										*/
 										// linearly merge and error check...
 										uint64_t before = i - 1;
+										/*
 										for (uint64_t k = i; k > 0; --k) {
 											if (chk[k - 1] == 0) {
 												before = k - 1;
 												break;
 											}
 										}
+										*/
 
 										int err = Merge(next[before], __global[i], &next[i]);
 
@@ -2433,20 +2437,21 @@ namespace claujson {
 									}
 
 									for (uint64_t i = start + 1; i <= last; ++i) {
-
+										/*
 										if (chk[i]) {
 											continue;
 										}
-
+										*/
 										// linearly merge and error check...
 										uint64_t before = i - 1;
+										/*
 										for (uint64_t k = i; k > 0; --k) {
 											if (chk[k - 1] == 0) {
 												before = k - 1;
 												break;
 											}
 										}
-
+										*/
 										int err = s->merge(__global[i], &next[i]);
 
 										if (-1 == err) {

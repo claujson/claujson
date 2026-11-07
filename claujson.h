@@ -910,6 +910,9 @@ namespace claujson {
 		// parse str small?
 		std::pair<bool, uint64_t> parse_small(StringView str, Document& d, bool use_lex_string = false);
 
+		// rename?
+		std::pair<bool, uint64_t> parse_small2(StringView str, Document& d, uint64_t thr_num, bool use_lex_string = false);
+		
 		// parse json file.
 		std::pair<bool, uint64_t> parse(StringView fileName, Document& d, uint64_t thr_num, bool use_lex_string = false);
 

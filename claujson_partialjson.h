@@ -65,22 +65,22 @@ namespace claujson {
 		 bool add_array_element(Value val);
 
 	public:
-		void MergeWith(Array* j, int start_offset);
-		void MergeWith(Object* j, int start_offset);
-		void MergeWith(PartialJson* j, int start_offset);
+		bool MergeWith(Array* j, int start_offset);
+		bool MergeWith(Object* j, int start_offset);
+		bool MergeWith(PartialJson* j, int start_offset);
 
 	private:
-		void add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
+		bool add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
 			char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_heap_string);
 		
-		void add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
+		bool add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
 			char* buf, uint64_t val_token_idx, bool use_heap_string);
 
-		void add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
+		bool add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
 			_ValueType type, uint64_t key_token_idx, bool use_heap_string
 
 		);
-		void add_user_type(_ValueType type
+		bool add_user_type(_ValueType type
 
 		);
 	};

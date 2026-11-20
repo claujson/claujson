@@ -9,6 +9,27 @@
 
 
 namespace claujson {
+	
+	class _Value;
+
+#define CLAUJSON_FAIL(error_no, msg) \
+	do { \
+		log << warn << error_no << " : " << msg << "\n"; \
+		return error_no; \
+		/* error.make(__LINE__, StringView(msg)); */ \
+	} while (false) 
+
+
+
+	claujson::_Value& Convert(claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
+		char* buf, uint64_t token_idx, bool& err, bool use_lex_string);
+
+	enum class MergeStatus : int {
+		MERGE_ERROR = -2,
+		MERGE_RIGHT_DEEPER = -1,
+		MERGE_SAME = 0,
+		MERGE_LEFT_DEEPER = 1,
+	};
 
 	//only used in Array, and Object, (parent Pointer + is_virtual?)
 	class Pointer {
@@ -600,25 +621,27 @@ namespace claujson {
 		
 		bool assign_value(uint64_t idx, Value val);
 
-
-		void MergeWith(StructuredPtr j, int start_offset);
+		[[nodiscard]]
+		bool MergeWith(StructuredPtr j, int start_offset);
 
 		void reserve_data_list(uint64_t sz);
 
 	private:
 		// need rename param....!
-		void add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
+		[[nodiscard]]
+		bool add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
 			char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_lex_string);
-
-		void add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
+		[[nodiscard]]
+		bool add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
 			char* buf, uint64_t val_token_idx, bool use_lex_string);
-
-		void add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
+		[[nodiscard]]
+		bool add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
 			_ValueType type, uint64_t key_token_idx, bool use_lex_string
 		);
 
 		//
-		void add_user_type(_ValueType type
+		[[nodiscard]]
+		bool add_user_type(_ValueType type
 		); // int type -> enum?
 	public:
 
@@ -676,7 +699,7 @@ namespace claujson {
 
 		bool _return() const noexcept { return _return_; }
 
-		int merge(StructuredPtr other, StructuredPtr* other_now);
+		MergeStatus merge(StructuredPtr other, StructuredPtr* other_now);
 
 		bool ends_with_remain() const noexcept {
 			return _ends_with_remain;
@@ -967,15 +990,3 @@ namespace claujson {
 }
 
 #define claujson_inline _simdjson_inline
-
-
-#define CLAUJSON_ERROR(msg) \
-	do { \
-		throw msg; \
-		/* error.make(__LINE__, StringView(msg)); */ \
-	} while (false) 
-
-namespace claujson {
-	claujson::_Value& Convert(claujson::_Value& data, uint64_t buf_idx, uint64_t next_buf_idx, bool key,
-			char* buf, uint64_t token_idx, bool& err, bool use_lex_string);
-}

@@ -325,14 +325,12 @@ namespace claujson {
 		obj_data.erase(obj_data.begin() + idx);
 	}
 
-
-	void Object::MergeWith(Array* j, int start_offset) {
-		CLAUJSON_ERROR("Object::MergeWith Error");
-		return;
+	bool Object::MergeWith(Array* j, int start_offset) {
+		CLAUJSON_FAIL(false, "Object::MergeWith Error");
 	}
 
 
-	void Object::MergeWith(Object* j, int start_offset) {
+	bool Object::MergeWith(Object* j, int start_offset) {
 		auto* x = j;
 
 		uint64_t len = j->get_data_size();
@@ -354,13 +352,14 @@ namespace claujson {
 		else {
 			log << info << "test1";
 		}
+		return true;
 	}
-	void Object::MergeWith(PartialJson* j, int start_offset) {
+	bool Object::MergeWith(PartialJson* j, int start_offset) {
 
 		auto* x = j;
 
 		if (x->arr_vec.empty() == false) { // not object?
-			CLAUJSON_ERROR("partial json is not object");
+			CLAUJSON_FAIL(false, "partial json is not object");
 		}
 
 		uint64_t len = j->get_data_size();
@@ -386,54 +385,54 @@ namespace claujson {
 		else {
 			log << info << "test2";
 		}
+		return true;
 	}
 
-	void Object::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
+	bool Object::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
 		char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_heap_string) {
 
-			{
-				_Value temp;// key
-				_Value temp2;
 
-				bool e = false;
+		_Value temp;// key
+		_Value temp2;
 
-				claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, !use_heap_string);
+		bool e = false;
 
-				if (e) {
-					CLAUJSON_ERROR("Error in add_item_type");
-				}
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
-				if (e) {
-					CLAUJSON_ERROR("Error in add_item_type");
-				}
+		claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, !use_heap_string);
 
-				if (!temp.is_str()) {
-					CLAUJSON_ERROR("Error in add_item_type, key is not string");
-				}
+		if (e) {
+			CLAUJSON_FAIL(false, "Error in add_item_type");
+		}
+		claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
+		if (e) {
+			CLAUJSON_FAIL(false, "Error in add_item_type");
+		}
 
-				obj_data.emplace_back(std::move(temp), std::move(temp2));
-			}
+		if (!temp.is_str()) {
+			CLAUJSON_FAIL(false, "Error in add_item_type, key is not string");
+		}
+
+		obj_data.emplace_back(std::move(temp), std::move(temp2));
+		return true;
 	}
 
-	void Object::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
+	bool Object::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
 		char* buf, uint64_t val_token_idx, bool use_heap_string) {
 		// error
 
 		log << warn << "errr..";
-		CLAUJSON_ERROR("Error Object::add_item_type");
+		CLAUJSON_FAIL(false, "Error Object::add_item_type");
 	}
 
-	void Object::add_user_type(_ValueType type
+	bool Object::add_user_type(_ValueType type
 
 	) {
 		// error
 
 		log << warn << "errr..";
-		CLAUJSON_ERROR("Error Object::add_user_type");
-		return;
+		CLAUJSON_FAIL(false, "Error Object::add_user_type");
 	}
 
-	void Object::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
+	bool Object::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
 		_ValueType type, uint64_t key_token_idx, bool use_heap_string
 
 	) {
@@ -444,19 +443,19 @@ namespace claujson {
 
 			claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, !use_heap_string);
 			if (e) {
-				CLAUJSON_ERROR("Error in add_user_type");
+				CLAUJSON_FAIL(false, "Error in add_user_type");
 			}
 
 			if (temp.is_str() == false) {
-				CLAUJSON_ERROR("Error in add_item_type, key is not string");
+				CLAUJSON_FAIL(false, "Error in add_item_type, key is not string");
 			}
 
 			if (type == _ValueType::OBJECT) {
 				Object* json = new (std::nothrow) Object(
 				);
+
 				if (json == nullptr) {
-					log << warn << "new error";
-					return;
+					CLAUJSON_FAIL(false, "new error");
 				}
 
 				json->set_parent(this);
@@ -467,8 +466,7 @@ namespace claujson {
 				Array* json = new (std::nothrow) Array(
 				);
 				if (json == nullptr) {
-					log << warn << "new error";
-					return;
+					CLAUJSON_FAIL(false, "new error");
 				}
 
 				json->set_parent(this);
@@ -476,5 +474,6 @@ namespace claujson {
 
 			}
 		}
+		return true;
 	}
 }

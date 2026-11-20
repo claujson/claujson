@@ -190,69 +190,70 @@ namespace claujson {
 			obj_data.reserve(len);
 		}
 	}
-	void PartialJson::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
+	bool PartialJson::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
 		char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_heap_string) {
 
-			{
-				_Value temp;
-				_Value temp2;
+		_Value temp;
+		_Value temp2;
 
-				bool e = false;
+		bool e = false;
 
-				claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, !use_heap_string);
+		claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, !use_heap_string);
 
-				if (e) {
-					CLAUJSON_ERROR("Error in add_item_type");
-				}
+		if (e) {
+			CLAUJSON_FAIL(false, "Error in add_item_type");
+		}
 
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
+		claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
 
-				if (e) {
-					CLAUJSON_ERROR("Error in add_item_type");
-				}
+		if (e) {
+			CLAUJSON_FAIL(false, "Error in add_item_type");
+		}
 
-				if (temp.is_str() == false) {
-					CLAUJSON_ERROR("Error in add_item_type, key is not string");
-				}
+		if (temp.is_str() == false) {
+			CLAUJSON_FAIL(false, "Error in add_item_type, key is not string");
+		}
 
 
-				if (!arr_vec.empty()) {
-					CLAUJSON_ERROR("partialJson is array or object.6");
-				}
+		if (!arr_vec.empty()) {
+			CLAUJSON_FAIL(false, "partialJson is array or object.6");
+		}
 
-				obj_data.push_back({ std::move(temp), std::move(temp2) });
-			}
+		obj_data.push_back({ std::move(temp), std::move(temp2) });
+
+		return true;
 	}
 
-	void PartialJson::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
+	bool PartialJson::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
 		char* buf, uint64_t val_token_idx, bool use_heap_string) {
 
-			{
-				_Value temp2;
-				bool e = false;
 
-				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
+		_Value temp2;
+		bool e = false;
 
-				if (e) {
+		claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
 
-					CLAUJSON_ERROR("Error in add_item_type");
-				}
+		if (e) {
 
-				if (!obj_data.empty()) {
-					CLAUJSON_ERROR("partialJson is array or object.5");
-				}
+			CLAUJSON_FAIL(false, "Error in add_item_type");
+		}
 
-				arr_vec.push_back(std::move(temp2));
-			}
+		if (!obj_data.empty()) {
+			CLAUJSON_FAIL(false, "partialJson is array or object.5");
+		}
+
+		arr_vec.push_back(std::move(temp2));
+
+		return true;
 	}
 
-	 void PartialJson::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
+	 bool PartialJson::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
 		_ValueType type, uint64_t key_token_idx, bool use_heap_string
 
 	) {
 		{
 			if (!arr_vec.empty()) {
-				CLAUJSON_ERROR("partialJson is array or object.4"); // chk?
+				CLAUJSON_FAIL(false, "partialJson is array or object.4"); // chk?
 			}
 
 			_Value temp;
@@ -261,11 +262,11 @@ namespace claujson {
 			claujson::Convert(temp, key_buf_idx, key_next_buf_idx, true, buf, key_token_idx, e, !use_heap_string);
 
 			if (e) {
-				CLAUJSON_ERROR("Error in add_user_type");
+				CLAUJSON_FAIL(false, "Error in add_user_type");
 			}
 
 			if (temp.is_str() == false) {
-				CLAUJSON_ERROR("Error in add_item_type, key is not string");
+				CLAUJSON_FAIL(false, "Error in add_item_type, key is not string");
 			}
 
 			if (type == _ValueType::OBJECT) {
@@ -273,8 +274,7 @@ namespace claujson {
 				);
 
 				if (json == nullptr) {
-					log << warn << "new error";
-					return;
+					CLAUJSON_FAIL(false, "new error");
 				}
 
 				obj_data.push_back({ std::move(temp), _Value(json) });
@@ -287,8 +287,7 @@ namespace claujson {
 				);
 
 				if (json == nullptr) {
-					log << warn << "new error";
-					return;
+					CLAUJSON_FAIL(false, "new error");
 				}
 
 				obj_data.push_back({ std::move(temp), _Value(json) });
@@ -296,13 +295,14 @@ namespace claujson {
 				json.set_parent(StructuredPtr(this));
 			}
 		}
+		return true;
 	}
-	 void PartialJson::add_user_type(_ValueType type
+	 bool PartialJson::add_user_type(_ValueType type
 
 	) {
 		{
 			if (!obj_data.empty()) {
-				CLAUJSON_ERROR("PartialJson is array or object.3");
+				CLAUJSON_FAIL(false, "PartialJson is array or object.3");
 			}
 
 			StructuredPtr json;
@@ -319,14 +319,14 @@ namespace claujson {
 			}
 
 			if (json == nullptr) {
-				log << warn << "new error";
-				return;
+				CLAUJSON_FAIL(false, "new error");
 			}
 
 			arr_vec.push_back(_Value(json));
 
 			json.set_parent(this);
 		}
+		return true;
 	}
 
 	bool PartialJson::add_object_element(Value key, Value val) {
@@ -345,8 +345,7 @@ namespace claujson {
 			return false;
 		}
 		if (!arr_vec.empty()) {
-			CLAUJSON_ERROR("partialJson is array or object.2");
-			return false;
+			CLAUJSON_FAIL(false, "partialJson is array or object.2");
 		}
 		
 		if (val.Get().is_array()) {
@@ -376,7 +375,7 @@ namespace claujson {
 		}
 		
 		if (!obj_data.empty()) {
-			CLAUJSON_ERROR("partialJson is array or object.1");
+			CLAUJSON_FAIL(false, "partialJson is array or object.1");
 			return false;
 		}
 
@@ -392,7 +391,7 @@ namespace claujson {
 
 		return true;
 	}
-	void  PartialJson::MergeWith(Array* j, int start_offset) {
+	bool  PartialJson::MergeWith(Array* j, int start_offset) {
 		auto* x = j;
 
 		uint64_t len = j->get_data_size();
@@ -412,11 +411,12 @@ namespace claujson {
 
 			log << info << "test5";
 		}
+		return true;
 	}
-	void  PartialJson::MergeWith(Object* j, int start_offset) {
-		CLAUJSON_ERROR("PartialJson::MergeWith Error");
+	bool  PartialJson::MergeWith(Object* j, int start_offset) {
+		CLAUJSON_FAIL(false, "PartialJson::MergeWith Error");
 	}
-	void  PartialJson::MergeWith(PartialJson* j, int start_offset) {
+	bool  PartialJson::MergeWith(PartialJson* j, int start_offset) {
 		auto* x = (j);
 
 		uint64_t len = j->get_data_size();
@@ -441,6 +441,8 @@ namespace claujson {
 
 			log << info << "test6";
 		}
+
+		return true;
 	}
 
 }

@@ -232,7 +232,7 @@ namespace claujson {
 	}
 
 
-	void Array::MergeWith(Array* j, int start_offset) {
+	bool Array::MergeWith(Array* j, int start_offset) {
 		auto* x = j;
 
 		uint64_t len = j->get_data_size();
@@ -253,15 +253,17 @@ namespace claujson {
 
 			log << info << "test3";
 		}
+
+		return true;
 	}
-	void Array::MergeWith(Object* j, int start_offset) {
-		CLAUJSON_ERROR("Array::MergeWith Error");
+	bool Array::MergeWith(Object* j, int start_offset) {
+		CLAUJSON_FAIL(false, "Array::MergeWith Error");
 	}
-	void Array::MergeWith(PartialJson* j, int start_offset) {
+	bool Array::MergeWith(PartialJson* j, int start_offset) {
 		auto* x = j;
 
 		if (x->obj_data.empty() == false) { // not object?
-			CLAUJSON_ERROR("partial json is not array");
+			CLAUJSON_FAIL(false, "partial json is not array");
 		}
 
 		uint64_t len = j->get_data_size();
@@ -286,18 +288,19 @@ namespace claujson {
 
 			log << info << "test4";
 		}
+		return true;
 	}
 
 
-	void Array::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
+	bool Array::add_item_type(int64_t key_buf_idx, int64_t key_next_buf_idx, int64_t val_buf_idx, int64_t val_next_buf_idx,
 		char* buf, uint64_t key_token_idx, uint64_t val_token_idx, bool use_heap_string) {
 
 		// error
 		log << warn << "error..";
-		CLAUJSON_ERROR("Error Array::add_item_type");
+		CLAUJSON_FAIL(false, "Error Array::add_item_type");
 	}
 
-	void Array::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
+	bool Array::add_item_type(int64_t val_buf_idx, int64_t val_next_buf_idx,
 		char* buf, uint64_t val_token_idx, bool use_heap_string) {
 
 			{
@@ -305,22 +308,22 @@ namespace claujson {
 				bool e = false;
 				claujson::Convert(temp2, val_buf_idx, val_next_buf_idx, false, buf, val_token_idx, e, !use_heap_string);
 				if (e) {
-
-					CLAUJSON_ERROR("Error in add_item_type");
+					CLAUJSON_FAIL(false, "Error in add_item_type");
 				}
 				arr_vec.emplace_back(std::move(temp2));
 			}
+			return true;
 	}
 
-	void Array::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
+	bool Array::add_user_type(int64_t key_buf_idx, int64_t key_next_buf_idx, char* buf,
 		_ValueType type, uint64_t key_token_idx, bool use_heap_string
 
 	) {
 		log << warn << "error";
-		CLAUJSON_ERROR("Array::add_user_type1");
+		CLAUJSON_FAIL(false, "Array::add_user_type1");
 	}
 
-	void Array::add_user_type(_ValueType type
+	bool Array::add_user_type(_ValueType type
 
 	) {
 
@@ -331,7 +334,7 @@ namespace claujson {
 
 			if (json == nullptr) {
 				log << warn << "new error";
-				return;
+				return false;
 			}
 
 			arr_vec.push_back(_Value(json));
@@ -344,12 +347,13 @@ namespace claujson {
 
 			if (json == nullptr) {
 				log << warn << "new error";
-				return;
+				return false;
 			}
 
 			arr_vec.push_back(_Value(json));
 			json->set_parent(this);
 		}
+		return true;
 	}
 	
 }
